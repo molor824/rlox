@@ -42,9 +42,23 @@ mod tests {
 
     #[test]
     fn test_integer_parser() {
-        assert!(matches!(
-            integer_parser(10).parse(Scanner::new("431")),
-            Ok(Some((_, SpanOf(_, v)))) if v == vec![4, 3, 1]
-        ));
+        assert_eq!(
+            integer_parser(10)
+                .parse(Scanner::new("351"))
+                .unwrap()
+                .unwrap()
+                .1
+                 .1,
+            [3, 5, 1]
+        );
+        assert_eq!(
+            integer_parser(16)
+                .parse(Scanner::new("Ff3"))
+                .unwrap()
+                .unwrap()
+                .1
+                 .1,
+            [0xf, 0xf, 3]
+        );
     }
 }
