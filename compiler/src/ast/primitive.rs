@@ -1,3 +1,5 @@
+use num_bigint::{BigInt, BigUint};
+
 use crate::span::Span;
 
 use super::{
@@ -58,26 +60,25 @@ fn digit_parser(radix: u32) -> Parser<Span<u8>> {
         None => Parser::new_err(ch.map(|_| ErrorCode::CharNotDigit)),
     })
 }
-fn integer_parser(radix: u32) -> Parser<Span<Vec<u8>>> {
-    digit_parser(radix).map(|d| d.map(|d| vec![d])).fold(
-        move || digit_parser(radix),
-        move |acc, digit| {
-            acc.combine(digit, |mut acc, d| {
-                acc.push(d);
-                acc
-            })
-        },
-    )
+fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
+    digit_parser(radix)
+        .map(|d| d.map(|d| BigUint::from(d)))
+        .fold(
+            move || digit_parser(radix),
+            move |acc, digit| {
+                acc.combine(digit, |mut acc, d| {
+                    acc *= radix;
+                    acc += d;
+                    acc
+                })
+            },
+        )
 }
-// if dot_index is some and 0
-// all digits are whole
-// if dot_index is some, then it indicates how many digits are before the dot
-// 35.2 would have dot_index of 2 as 3 and 5 is before the dot
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NumberToken {
     pub radix: u32,
-    pub digits: Vec<u8>,
-    pub dot_index: Option<i32>,
+    pub integer: BigUint,
+    pub exponent: Option<i32>,
 }
 fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
     integer_parser(radix).and_then(move |whole| {
@@ -85,23 +86,30 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
             .and_then(move |dot| {
                 integer_parser(radix)
                     .map(move |frac| dot.combine(frac, |_, frac| frac))
-                    .or_else(move |_| Parser::new_ok(dot.map(|_| vec![])))
+                    .or_else(move |_| Parser::new_ok(dot.map(|_| BigUint::ZERO)))
             })
             .map({
                 let whole = whole.clone();
                 move |frac| {
-                    frac.combine(whole, |frac, whole| NumberToken {
+                    let frac_len = frac.end - frac.start - 1;
+                    whole.combine(frac, |wh, fr| NumberToken {
                         radix,
-                        dot_index: Some(whole.len() as i32),
-                        digits: [whole, frac].concat(),
+                        integer: {
+                            let mut integer = wh;
+                            for _ in 0..frac_len {
+                                integer *= radix;
+                            }
+                            integer + fr
+                        },
+                        exponent: Some(-(frac_len as i32)),
                     })
                 }
             })
             .or_else(move |_| {
                 Parser::new_ok(whole.map(|whole| NumberToken {
                     radix,
-                    digits: whole,
-                    dot_index: None,
+                    integer: whole,
+                    exponent: None,
                 }))
             })
     })
@@ -127,43 +135,33 @@ fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
             integer_parser(radix)
                 .and_then({
                     let decimal = decimal.clone();
-                    move |exp| {
-                        let mut exponent: i32 = 0;
-                        for digit in &exp.value {
-                            exponent = match exponent
-                                .checked_mul(radix as i32)
-                                .and_then(|e| e.checked_add(*digit as i32))
-                            {
-                                Some(e) => e,
-                                None => {
-                                    return Parser::new_err(
-                                        exp.map(|_| ErrorCode::ExponentOverflow),
-                                    )
-                                }
-                            }
+                    move |exponent| {
+                        let mut exp = BigInt::from(exponent.value);
+                        if let Some(Span { value: '-', .. }) = sign {
+                            exp = -exp;
                         }
-                        exponent = match sign {
-                            Some(s) if s.value == '+' => exponent,
-                            None => exponent,
-                            _ => -exponent,
+                        if let Some(old_exp) = decimal.value.exponent {
+                            exp += old_exp;
+                        }
+                        let exp = match i32::try_from(exp) {
+                            Ok(exp) => exp,
+                            Err(_) => {
+                                return Parser::new_err(Span::new(
+                                    exponent.start,
+                                    exponent.end,
+                                    ErrorCode::ExponentOverflow,
+                                ))
+                            }
                         };
-                        exponent = match decimal.value.dot_index {
-                            Some(dot_index) => match dot_index.checked_add(exponent) {
-                                Some(e) => e,
-                                None => {
-                                    return Parser::new_err(
-                                        exp.map(|_| ErrorCode::ExponentOverflow),
-                                    )
-                                }
+                        Parser::new_ok(Span::new(
+                            decimal.start,
+                            exponent.end,
+                            NumberToken {
+                                radix: decimal.value.radix,
+                                integer: decimal.value.integer,
+                                exponent: Some(exp),
                             },
-                            None => exponent,
-                        };
-
-                        Parser::new_ok(decimal.combine(exp, |decimal, _| NumberToken {
-                            radix: decimal.radix,
-                            digits: decimal.digits,
-                            dot_index: Some(exponent),
-                        }))
+                        ))
                     }
                 })
                 .or_else(move |_| Parser::new_err(decimal.map(|_| ErrorCode::MissingExponent)))
@@ -184,7 +182,7 @@ mod tests {
                 .unwrap()
                 .1
                 .value,
-            [3, 5, 1]
+            BigUint::from(351_u32)
         );
         assert_eq!(
             integer_parser(16)
@@ -192,7 +190,7 @@ mod tests {
                 .unwrap()
                 .1
                 .value,
-            [0xf, 0xf, 3]
+            BigUint::from(0xff3_u32)
         );
     }
 
@@ -206,8 +204,8 @@ mod tests {
                 .value,
             NumberToken {
                 radix: 10,
-                digits: vec![3, 3, 5],
-                dot_index: Some(3)
+                integer: BigUint::from(335_u32),
+                exponent: Some(0),
             }
         );
         assert_eq!(
@@ -218,8 +216,8 @@ mod tests {
                 .value,
             NumberToken {
                 radix: 16,
-                digits: vec![0xA, 0xe, 0xF, 0xF],
-                dot_index: Some(2)
+                integer: BigUint::from(0xaeff_u32),
+                exponent: Some(-2),
             }
         );
     }
@@ -233,8 +231,8 @@ mod tests {
                 .value,
             NumberToken {
                 radix: 10,
-                digits: vec![3, 5],
-                dot_index: Some(1 - 4),
+                integer: BigUint::from(35_u32),
+                exponent: Some(-1 - 4),
             }
         );
         assert_eq!(
@@ -245,20 +243,20 @@ mod tests {
                 .value,
             NumberToken {
                 radix: 10,
-                digits: vec![0, 5, 3],
-                dot_index: Some(1 + 2),
+                integer: BigUint::from(053_u32),
+                exponent: Some(-2 + 2),
             }
         );
         assert_eq!(
             exponent_parser(16)
-                .parse(Scanner::new("E.3p+FF"))
+                .parse(Scanner::new("E.3pFF"))
                 .unwrap()
                 .1
                 .value,
             NumberToken {
                 radix: 16,
-                digits: vec![0xE, 3],
-                dot_index: Some(1 + 0xFF),
+                integer: BigUint::from(0xe3_u32),
+                exponent: Some(-1 + 0xff),
             }
         );
     }
