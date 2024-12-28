@@ -7,7 +7,7 @@ mod error;
 mod primitive;
 mod scanner;
 
-pub type ParseResult<T> = Result<Option<(Scanner, T)>, Error>;
+pub type ParseResult<T> = Result<(Scanner, T), Error>;
 
 pub struct Parser<T>(Box<dyn FnOnce(Scanner) -> ParseResult<T>>);
 impl<T> Parser<T> {
@@ -20,33 +20,30 @@ impl<T> Parser<T> {
 }
 impl<T: 'static> Parser<T> {
     pub fn new_ok(result: T) -> Self {
-        Self::new(move |scanner| Ok(Some((scanner, result))))
-    }
-    pub fn new_none() -> Self {
-        Self::new(move |_| Ok(None))
+        Self::new(move |scanner| Ok((scanner, result)))
     }
     pub fn new_err(code: SpanOf<ErrorCode>) -> Self {
         Self::new(move |scanner| Err(Error::new(scanner.source, code)))
     }
+    pub fn new_err_with(func: impl FnOnce(Scanner) -> SpanOf<ErrorCode> + 'static) -> Self {
+        Self::new(move |scanner| Err(Error::new(scanner.source.clone(), func(scanner))))
+    }
     pub fn map<U>(self, f: impl FnOnce(T) -> U + 'static) -> Parser<U> {
-        Parser::new(move |scanner| {
-            self.parse(scanner)
-                .map(|result| result.map(|(next, result)| (next, f(result))))
-        })
+        Parser::new(move |scanner| self.parse(scanner).map(|(next, result)| (next, f(result))))
     }
     pub fn map_err(self, f: impl FnOnce(Error) -> Error + 'static) -> Parser<T> {
         Parser::new(move |scanner| self.parse(scanner).map_err(f))
     }
     pub fn and_then<U>(self, f: impl FnOnce(T) -> Parser<U> + 'static) -> Parser<U> {
-        Parser::new(move |scanner| match self.parse(scanner)? {
-            Some((next, result)) => f(result).parse(next),
-            None => Ok(None),
+        Parser::new(move |scanner| match self.parse(scanner.clone()) {
+            Ok((next, result)) => f(result).parse(next),
+            Err(err) => Err(err),
         })
     }
-    pub fn or_else(self, f: impl FnOnce() -> Parser<T> + 'static) -> Parser<T> {
-        Parser::new(move |scanner| match self.parse(scanner.clone())? {
-            Some(result) => Ok(Some(result)),
-            None => f().parse(scanner),
+    pub fn or_else(self, f: impl FnOnce(Error) -> Parser<T> + 'static) -> Parser<T> {
+        Parser::new(move |scanner| match self.parse(scanner.clone()) {
+            Err(e) => f(e).parse(scanner),
+            n => n,
         })
     }
     pub fn fold<U: 'static>(
@@ -55,12 +52,12 @@ impl<T: 'static> Parser<T> {
         mut init: U,
     ) -> Parser<U> {
         Parser::new(move |mut scanner| loop {
-            match parser().parse(scanner.clone())? {
-                Some((next, result)) => {
+            match parser().parse(scanner.clone()) {
+                Ok((next, result)) => {
                     scanner = next;
                     init = accumulator(init, result);
                 }
-                None => return Ok(Some((scanner, init))),
+                Err(_) => return Ok((scanner, init)),
             }
         })
     }

@@ -15,4 +15,9 @@ impl Error {
     }
 }
 #[derive(Error, Debug, Clone)]
-pub enum ErrorCode {}
+pub enum ErrorCode {
+    #[error("reached end of file.")]
+    Eof,
+    #[error("unexpected character {0:?}")]
+    UnexpectedChar(char),
+}
