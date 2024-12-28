@@ -1,51 +1,62 @@
-use crate::span::{Span, SpanOf};
+use crate::span::Span;
 
 use super::{
     error::{Error, ErrorCode},
+    scanner::Scanner,
     Parser,
 };
 
-fn char_parser() -> Parser<SpanOf<char>> {
+fn next_char() -> Parser<Span<char>> {
     Parser::new(|scanner| match scanner.clone().next() {
-        Some((next, ch, offset)) => Ok((next, SpanOf(Span(offset, offset + ch.len_utf8()), ch))),
-        None => Err(Error::new(
-            scanner.source,
-            SpanOf(Span::fill(scanner.offset), ErrorCode::Eof),
-        )),
+        Some((next, ch, offset)) => Ok((next, Span::new(offset, offset + ch.len_utf8(), ch))),
+        None => Err(Error::new(scanner.source, scanner.offset, ErrorCode::Eof)),
     })
 }
-fn char_match(f: impl FnOnce(char) -> bool + 'static) -> Parser<SpanOf<char>> {
-    char_parser().and_then(move |SpanOf(span, ch)| {
-        if f(ch) {
-            Parser::new_ok(SpanOf(span, ch))
+fn string_eq(string: &'static str) -> Parser<Span<()>> {
+    Parser::new(move |scanner| {
+        if scanner.source[scanner.offset..].starts_with(string) {
+            Ok((
+                Scanner {
+                    offset: scanner.offset + string.len(),
+                    source: scanner.source,
+                },
+                Span::new(scanner.offset, scanner.offset + string.len(), ()),
+            ))
         } else {
-            Parser::new_err(SpanOf(span, ErrorCode::UnexpectedChar(ch)))
+            Err(Error::new(
+                scanner.source,
+                scanner.offset,
+                ErrorCode::StringNotEq(string),
+            ))
+        }
+    })
+}
+fn char_match(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
+    next_char().and_then(move |ch| {
+        if f(ch.value) {
+            Parser::new_ok(ch)
+        } else {
+            Parser::new_err(ch.start, ErrorCode::CharNotEq(ch.value))
         }
     })
 }
 
-fn digit_parser(radix: u32) -> Parser<SpanOf<u8>> {
-    char_parser().and_then(move |SpanOf(span, ch)| match ch.to_digit(radix) {
-        Some(d) => Parser::new_ok(SpanOf(span, d as u8)),
-        None => Parser::new_err(SpanOf(span, ErrorCode::UnexpectedChar(ch))),
+fn digit_parser(radix: u32) -> Parser<Span<u8>> {
+    next_char().and_then(move |ch| match ch.value.to_digit(radix) {
+        Some(d) => Parser::new_ok(ch.map(|_| d as u8)),
+        None => Parser::new_err(ch.start, ErrorCode::CharNotDigit(ch.value)),
     })
 }
-fn integer_parser(radix: u32) -> Parser<SpanOf<Vec<u8>>> {
-    Parser::fold::<Option<SpanOf<Vec<u8>>>>(
+fn integer_parser(radix: u32) -> Parser<Span<Vec<u8>>> {
+    digit_parser(radix).map(|d| d.map(|d| vec![d])).fold(
         move || digit_parser(radix),
-        |acc, SpanOf(dspan, digit)| match acc {
-            Some(SpanOf(span, mut vec)) => {
-                vec.push(digit);
-                Some(SpanOf(span.concat(dspan), vec))
-            }
-            None => Some(SpanOf(dspan, vec![digit])),
+        move |acc, digit| {
+            acc.combine(digit, |mut acc, d| {
+                acc.push(d);
+                acc
+            })
         },
-        None,
     )
-    .and_then(move |integer| match integer {
-        Some(i) => Parser::new_ok(i),
-        None => Parser::new_err_with(|scanner| SpanOf(Span::fill(scanner.offset), ErrorCode::Eof)),
-    })
 }
 // if dot_index is some and 0
 // all digits are whole
@@ -57,36 +68,30 @@ struct NumberToken {
     pub digits: Vec<u8>,
     pub dot_index: Option<i32>,
 }
-fn decimal_parser(radix: u32) -> Parser<SpanOf<NumberToken>> {
-    integer_parser(radix).and_then(move |SpanOf(whole_span, whole)| {
+fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
+    integer_parser(radix).and_then(move |whole| {
         char_match(|ch| ch == '.')
-            .and_then(move |SpanOf(dot, _)| {
+            .and_then(move |dot| {
                 integer_parser(radix)
-                    .map(move |SpanOf(frac_span, frac)| SpanOf(dot.concat(frac_span), frac))
-                    .or_else(move |_| Parser::new_ok(SpanOf(dot, vec![])))
+                    .map(move |frac| dot.combine(frac, |_, frac| frac))
+                    .or_else(move |_| Parser::new_ok(dot.map(|_| vec![])))
             })
             .map({
                 let whole = whole.clone();
-                move |SpanOf(frac_span, frac)| {
-                    SpanOf(
-                        frac_span.concat(whole_span),
-                        NumberToken {
-                            radix,
-                            dot_index: Some(whole.len() as i32),
-                            digits: [whole, frac].concat(),
-                        },
-                    )
+                move |frac| {
+                    frac.combine(whole, |frac, whole| NumberToken {
+                        radix,
+                        dot_index: Some(whole.len() as i32),
+                        digits: [whole, frac].concat(),
+                    })
                 }
             })
             .or_else(move |_| {
-                Parser::new_ok(SpanOf(
-                    whole_span,
-                    NumberToken {
-                        radix,
-                        digits: whole,
-                        dot_index: None,
-                    },
-                ))
+                Parser::new_ok(whole.map(|whole| NumberToken {
+                    radix,
+                    digits: whole,
+                    dot_index: None,
+                }))
             })
     })
 }
@@ -99,11 +104,19 @@ mod tests {
     #[test]
     fn test_integer_parser() {
         assert_eq!(
-            integer_parser(10).parse(Scanner::new("351")).unwrap().1 .1,
+            integer_parser(10)
+                .parse(Scanner::new("351"))
+                .unwrap()
+                .1
+                .value,
             [3, 5, 1]
         );
         assert_eq!(
-            integer_parser(16).parse(Scanner::new("Ff3")).unwrap().1 .1,
+            integer_parser(16)
+                .parse(Scanner::new("Ff3"))
+                .unwrap()
+                .1
+                .value,
             [0xf, 0xf, 3]
         );
     }
@@ -115,7 +128,7 @@ mod tests {
                 .parse(Scanner::new("3.135"))
                 .unwrap()
                 .1
-                 .1,
+                .value,
             NumberToken {
                 radix: 10,
                 digits: [3, 1, 3, 5].to_vec(),
@@ -124,10 +137,10 @@ mod tests {
         );
         assert_eq!(
             decimal_parser(16)
-                .parse(Scanner::new("A.3FF"))
+                .parse(Scanner::new("A.3fF"))
                 .unwrap()
                 .1
-                 .1,
+                .value,
             NumberToken {
                 radix: 16,
                 digits: [0xA, 3, 0xF, 0xF].to_vec(),

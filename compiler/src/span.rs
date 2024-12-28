@@ -1,14 +1,21 @@
 #[derive(Debug, Clone, Copy)]
-pub struct Span(pub usize, pub usize);
-
-impl Span {
-    pub fn fill(v: usize) -> Self {
-        Self(v, v)
+pub struct Span<T> {
+    pub start: usize,
+    pub end: usize,
+    pub value: T,
+}
+impl<T> Span<T> {
+    pub const fn new(start: usize, end: usize, value: T) -> Self {
+        Self { start, end, value }
     }
-    pub fn concat(self, other: Self) -> Self {
-        Self(usize::min(self.0, other.0), usize::max(self.1, other.1))
+    pub fn combine<U, O>(self, other: Span<U>, f: impl FnOnce(T, U) -> O) -> Span<O> {
+        Span::new(
+            usize::min(self.start, other.start),
+            usize::max(self.end, other.end),
+            f(self.value, other.value),
+        )
+    }
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Span<U> {
+        Span::new(self.start, self.end, f(self.value))
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-pub struct SpanOf<T>(pub Span, pub T);

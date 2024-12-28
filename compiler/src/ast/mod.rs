@@ -1,8 +1,6 @@
 use error::{Error, ErrorCode};
 use scanner::Scanner;
 
-use crate::span::SpanOf;
-
 mod error;
 mod primitive;
 mod scanner;
@@ -22,11 +20,11 @@ impl<T: 'static> Parser<T> {
     pub fn new_ok(result: T) -> Self {
         Self::new(move |scanner| Ok((scanner, result)))
     }
-    pub fn new_err(code: SpanOf<ErrorCode>) -> Self {
-        Self::new(move |scanner| Err(Error::new(scanner.source, code)))
+    pub fn new_err(index: usize, code: ErrorCode) -> Self {
+        Self::new(move |scanner| Err(Error::new(scanner.source, index, code)))
     }
-    pub fn new_err_with(func: impl FnOnce(Scanner) -> SpanOf<ErrorCode> + 'static) -> Self {
-        Self::new(move |scanner| Err(Error::new(scanner.source.clone(), func(scanner))))
+    pub fn new_err_with(f: impl FnOnce(Scanner) -> Error + 'static) -> Self {
+        Self::new(move |scanner| Err(f(scanner)))
     }
     pub fn map<U>(self, f: impl FnOnce(T) -> U + 'static) -> Parser<U> {
         Parser::new(move |scanner| self.parse(scanner).map(|(next, result)| (next, f(result))))
@@ -47,24 +45,20 @@ impl<T: 'static> Parser<T> {
         })
     }
     pub fn fold<U: 'static>(
-        mut parser: impl FnMut() -> Parser<T> + 'static,
-        mut accumulator: impl FnMut(U, T) -> U + 'static,
-        mut init: U,
-    ) -> Parser<U> {
-        Parser::new(move |mut scanner| loop {
-            match parser().parse(scanner.clone()) {
-                Ok((next, result)) => {
-                    scanner = next;
-                    init = accumulator(init, result);
+        self,
+        mut parser: impl FnMut() -> Parser<U> + 'static,
+        mut accumulator: impl FnMut(T, U) -> T + 'static,
+    ) -> Self {
+        self.and_then(|mut init| {
+            Parser::new(move |mut scanner| loop {
+                match parser().parse(scanner.clone()) {
+                    Ok((next, value)) => {
+                        init = accumulator(init, value);
+                        scanner = next;
+                    }
+                    Err(_) => return Ok((scanner, init)),
                 }
-                Err(_) => return Ok((scanner, init)),
-            }
+            })
         })
-    }
-    pub fn reduce(
-        mut parser: impl FnMut() -> Parser<T> + 'static,
-        accumulator: impl FnMut(T, T) -> T + 'static,
-    ) -> Parser<T> {
-        parser().and_then(move |init| Parser::fold(parser, accumulator, init))
     }
 }
