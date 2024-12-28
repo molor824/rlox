@@ -125,26 +125,26 @@ mod tests {
     fn test_decimal_parser() {
         assert_eq!(
             decimal_parser(10)
-                .parse(Scanner::new("3.135"))
+                .parse(Scanner::new("335."))
                 .unwrap()
                 .1
                 .value,
             NumberToken {
                 radix: 10,
-                digits: [3, 1, 3, 5].to_vec(),
-                dot_index: Some(1)
+                digits: [3, 3, 5].to_vec(),
+                dot_index: Some(3)
             }
         );
         assert_eq!(
             decimal_parser(16)
-                .parse(Scanner::new("A.3fF"))
+                .parse(Scanner::new("Ae.fF"))
                 .unwrap()
                 .1
                 .value,
             NumberToken {
                 radix: 16,
-                digits: [0xA, 3, 0xF, 0xF].to_vec(),
-                dot_index: Some(1)
+                digits: [0xA, 0xe, 0xF, 0xF].to_vec(),
+                dot_index: Some(2)
             }
         );
     }
