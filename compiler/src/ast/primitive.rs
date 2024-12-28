@@ -12,7 +12,7 @@ fn next_char() -> Parser<Span<char>> {
         None => Err(Error::new(scanner.source, scanner.offset, ErrorCode::Eof)),
     })
 }
-fn string_eq(string: &'static str) -> Parser<Span<()>> {
+fn string_eq(string: &'static str) -> Parser<Span<&'static str>> {
     Parser::new(move |scanner| {
         if scanner.source[scanner.offset..].starts_with(string) {
             Ok((
@@ -20,7 +20,7 @@ fn string_eq(string: &'static str) -> Parser<Span<()>> {
                     offset: scanner.offset + string.len(),
                     source: scanner.source,
                 },
-                Span::new(scanner.offset, scanner.offset + string.len(), ()),
+                Span::new(scanner.offset, scanner.offset + string.len(), string),
             ))
         } else {
             Err(Error::new(
@@ -31,12 +31,12 @@ fn string_eq(string: &'static str) -> Parser<Span<()>> {
         }
     })
 }
-fn char_match(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
-    next_char().and_then(move |ch| {
-        if f(ch.value) {
-            Parser::new_ok(ch)
+fn char_eq(ch: char) -> Parser<Span<char>> {
+    next_char().and_then(move |char| {
+        if char.value == ch {
+            Parser::new_ok(char)
         } else {
-            Parser::new_err(ch.start, ErrorCode::CharNotEq(ch.value))
+            Parser::new_err(ErrorCode::CharNotEq(ch), Some(char.start))
         }
     })
 }
@@ -44,7 +44,7 @@ fn char_match(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
     next_char().and_then(move |ch| match ch.value.to_digit(radix) {
         Some(d) => Parser::new_ok(ch.map(|_| d as u8)),
-        None => Parser::new_err(ch.start, ErrorCode::CharNotDigit(ch.value)),
+        None => Parser::new_err(ErrorCode::CharNotDigit(ch.value), Some(ch.start)),
     })
 }
 fn integer_parser(radix: u32) -> Parser<Span<Vec<u8>>> {
@@ -70,7 +70,7 @@ struct NumberToken {
 }
 fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
     integer_parser(radix).and_then(move |whole| {
-        char_match(|ch| ch == '.')
+        char_eq('.')
             .and_then(move |dot| {
                 integer_parser(radix)
                     .map(move |frac| dot.combine(frac, |_, frac| frac))
