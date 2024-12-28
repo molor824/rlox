@@ -8,6 +8,9 @@ impl<T> Span<T> {
     pub const fn new(start: usize, end: usize, value: T) -> Self {
         Self { start, end, value }
     }
+    pub const fn from_len(start: usize, length: usize, value: T) -> Self {
+        Self::new(start, start + length, value)
+    }
     pub fn combine<U, O>(self, other: Span<U>, f: impl FnOnce(T, U) -> O) -> Span<O> {
         Span::new(
             usize::min(self.start, other.start),

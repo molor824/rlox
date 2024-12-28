@@ -2,19 +2,16 @@ use std::rc::Rc;
 
 use thiserror::Error;
 
+use crate::span::Span;
+
 #[derive(Clone, Debug)]
 pub struct Error {
     source: Rc<str>,
-    index: usize,
-    code: ErrorCode,
+    code: Span<ErrorCode>,
 }
 impl Error {
-    pub const fn new(source: Rc<str>, index: usize, code: ErrorCode) -> Self {
-        Self {
-            source,
-            index,
-            code,
-        }
+    pub const fn new(source: Rc<str>, code: Span<ErrorCode>) -> Self {
+        Self { source, code }
     }
 }
 #[derive(Error, Debug, Clone)]
@@ -25,6 +22,12 @@ pub enum ErrorCode {
     StringNotEq(&'static str),
     #[error("character does not match {0:?}")]
     CharNotEq(char),
-    #[error("{0:?} is not a digit")]
-    CharNotDigit(char),
+    #[error("character does not match")]
+    CharNotMatch,
+    #[error("character is not a digit")]
+    CharNotDigit,
+    #[error("exponent overflow")]
+    ExponentOverflow,
+    #[error("missing exponent")]
+    MissingExponent,
 }

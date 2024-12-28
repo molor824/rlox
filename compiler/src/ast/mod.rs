@@ -1,6 +1,8 @@
 use error::{Error, ErrorCode};
 use scanner::Scanner;
 
+use crate::span::Span;
+
 mod error;
 mod primitive;
 mod scanner;
@@ -20,14 +22,8 @@ impl<T: 'static> Parser<T> {
     pub fn new_ok(result: T) -> Self {
         Self::new(move |scanner| Ok((scanner, result)))
     }
-    pub fn new_err(code: ErrorCode, index: Option<usize>) -> Self {
-        Self::new(move |scanner| {
-            Err(Error::new(
-                scanner.source,
-                index.unwrap_or(scanner.offset),
-                code,
-            ))
-        })
+    pub fn new_err(code: Span<ErrorCode>) -> Self {
+        Self::new(move |scanner| Err(Error::new(scanner.source, code)))
     }
     pub fn new_err_with(f: impl FnOnce(Scanner) -> Error + 'static) -> Self {
         Self::new(move |scanner| Err(f(scanner)))

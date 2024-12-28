@@ -9,7 +9,10 @@ use super::{
 fn next_char() -> Parser<Span<char>> {
     Parser::new(|scanner| match scanner.clone().next() {
         Some((next, ch, offset)) => Ok((next, Span::new(offset, offset + ch.len_utf8(), ch))),
-        None => Err(Error::new(scanner.source, scanner.offset, ErrorCode::Eof)),
+        None => Err(Error::new(
+            scanner.source,
+            Span::from_len(scanner.offset, 0, ErrorCode::Eof),
+        )),
     })
 }
 fn string_eq(string: &'static str) -> Parser<Span<&'static str>> {
@@ -25,8 +28,7 @@ fn string_eq(string: &'static str) -> Parser<Span<&'static str>> {
         } else {
             Err(Error::new(
                 scanner.source,
-                scanner.offset,
-                ErrorCode::StringNotEq(string),
+                Span::from_len(scanner.offset, 0, ErrorCode::StringNotEq(string)),
             ))
         }
     })
@@ -36,7 +38,16 @@ fn char_eq(ch: char) -> Parser<Span<char>> {
         if char.value == ch {
             Parser::new_ok(char)
         } else {
-            Parser::new_err(ErrorCode::CharNotEq(ch), Some(char.start))
+            Parser::new_err(char.map(|_| ErrorCode::CharNotEq(ch)))
+        }
+    })
+}
+fn char_match(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
+    next_char().and_then(move |ch| {
+        if f(ch.value) {
+            Parser::new_ok(ch)
+        } else {
+            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch))
         }
     })
 }
@@ -44,7 +55,7 @@ fn char_eq(ch: char) -> Parser<Span<char>> {
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
     next_char().and_then(move |ch| match ch.value.to_digit(radix) {
         Some(d) => Parser::new_ok(ch.map(|_| d as u8)),
-        None => Parser::new_err(ErrorCode::CharNotDigit(ch.value), Some(ch.start)),
+        None => Parser::new_err(ch.map(|_| ErrorCode::CharNotDigit)),
     })
 }
 fn integer_parser(radix: u32) -> Parser<Span<Vec<u8>>> {
@@ -95,6 +106,70 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
             })
     })
 }
+fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
+    decimal_parser(radix).and_then(move |decimal| {
+        if radix <= 10 {
+            char_match(|ch| matches!(ch, 'e' | 'E'))
+        } else {
+            char_match(|ch| matches!(ch, 'p' | 'P'))
+        }
+        .map(move |exp| decimal.combine(exp, |decimal, _| decimal))
+        .and_then(move |decimal| {
+            char_eq('+')
+                .or_else(move |_| char_eq('-'))
+                .map({
+                    let decimal = decimal.clone();
+                    move |sign| (decimal, Some(sign))
+                })
+                .or_else(move |_| Parser::new_ok((decimal, None)))
+        })
+        .and_then(move |(decimal, sign)| {
+            integer_parser(radix)
+                .and_then({
+                    let decimal = decimal.clone();
+                    move |exp| {
+                        let mut exponent: i32 = 0;
+                        for digit in &exp.value {
+                            exponent = match exponent
+                                .checked_mul(radix as i32)
+                                .and_then(|e| e.checked_add(*digit as i32))
+                            {
+                                Some(e) => e,
+                                None => {
+                                    return Parser::new_err(
+                                        exp.map(|_| ErrorCode::ExponentOverflow),
+                                    )
+                                }
+                            }
+                        }
+                        exponent = match sign {
+                            Some(s) if s.value == '+' => exponent,
+                            None => exponent,
+                            _ => -exponent,
+                        };
+                        exponent = match decimal.value.dot_index {
+                            Some(dot_index) => match dot_index.checked_add(exponent) {
+                                Some(e) => e,
+                                None => {
+                                    return Parser::new_err(
+                                        exp.map(|_| ErrorCode::ExponentOverflow),
+                                    )
+                                }
+                            },
+                            None => exponent,
+                        };
+
+                        Parser::new_ok(decimal.combine(exp, |decimal, _| NumberToken {
+                            radix: decimal.radix,
+                            digits: decimal.digits,
+                            dot_index: Some(exponent),
+                        }))
+                    }
+                })
+                .or_else(move |_| Parser::new_err(decimal.map(|_| ErrorCode::MissingExponent)))
+        })
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -131,7 +206,7 @@ mod tests {
                 .value,
             NumberToken {
                 radix: 10,
-                digits: [3, 3, 5].to_vec(),
+                digits: vec![3, 3, 5],
                 dot_index: Some(3)
             }
         );
@@ -143,8 +218,47 @@ mod tests {
                 .value,
             NumberToken {
                 radix: 16,
-                digits: [0xA, 0xe, 0xF, 0xF].to_vec(),
+                digits: vec![0xA, 0xe, 0xF, 0xF],
                 dot_index: Some(2)
+            }
+        );
+    }
+    #[test]
+    fn test_exponent() {
+        assert_eq!(
+            exponent_parser(10)
+                .parse(Scanner::new("3.5E-4"))
+                .unwrap()
+                .1
+                .value,
+            NumberToken {
+                radix: 10,
+                digits: vec![3, 5],
+                dot_index: Some(1 - 4),
+            }
+        );
+        assert_eq!(
+            exponent_parser(10)
+                .parse(Scanner::new("0.53e+2"))
+                .unwrap()
+                .1
+                .value,
+            NumberToken {
+                radix: 10,
+                digits: vec![0, 5, 3],
+                dot_index: Some(1 + 2),
+            }
+        );
+        assert_eq!(
+            exponent_parser(16)
+                .parse(Scanner::new("E.3p+FF"))
+                .unwrap()
+                .1
+                .value,
+            NumberToken {
+                radix: 16,
+                digits: vec![0xE, 3],
+                dot_index: Some(1 + 0xFF),
             }
         );
     }
