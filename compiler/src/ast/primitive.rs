@@ -30,7 +30,7 @@ fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
         } else {
             Err(Error::new(
                 scanner.source,
-                Span::from_len(scanner.offset, 0, ErrorCode::StringNotEq(string)),
+                Span::from_len(scanner.offset, 0, ErrorCode::ExpectedToken(string)),
             ))
         }
     })
@@ -40,16 +40,19 @@ fn char_eq_parser(ch: char) -> Parser<Span<char>> {
         if char.value == ch {
             Parser::new_ok(char)
         } else {
-            Parser::new_err(char.map(|_| ErrorCode::CharNotEq(ch)))
+            Parser::new_err(char.map(|_| ErrorCode::ExpectedChar(ch)))
         }
     })
 }
-fn char_match_parser(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
+fn char_match_parser(
+    f: impl FnOnce(char) -> bool + 'static,
+    on_error: &'static str,
+) -> Parser<Span<char>> {
     next_char_parser().and_then(move |ch| {
         if f(ch.value) {
             Parser::new_ok(ch)
         } else {
-            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch))
+            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch(on_error)))
         }
     })
 }
@@ -62,6 +65,7 @@ fn digit_parser(radix: u32) -> Parser<Span<u8>> {
 }
 fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
     digit_parser(radix)
+        .map_err(|e| e.map(|c| c.map(|_| ErrorCode::ExpectedInt)))
         .map(|d| d.map(|d| BigUint::from(d)))
         .fold(
             move || digit_parser(radix),
@@ -117,9 +121,9 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
 fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
     decimal_parser(radix).and_then(move |decimal| {
         if radix <= 10 {
-            char_match_parser(|ch| matches!(ch, 'e' | 'E'))
+            char_match_parser(|ch| matches!(ch, 'e' | 'E'), "'e' or 'E'")
         } else {
-            char_match_parser(|ch| matches!(ch, 'p' | 'P'))
+            char_match_parser(|ch| matches!(ch, 'p' | 'P'), "'p' or 'P'")
         }
         .map(move |exp| decimal.combine(exp, |decimal, _| decimal))
         .and_then(move |decimal| {
@@ -168,14 +172,50 @@ fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
         })
     })
 }
-fn string_parser() -> Parser<Span<String>> {
+fn escape_char_parser() -> Parser<Span<char>> {
+    char_eq_parser('\\')
+        .and_then(|slash| next_char_parser().map(move |ch| slash.combine(ch, |_, ch| ch)))
+        .and_then(move |ch| match ch.value {
+            'n' | 't' | 'r' | '\\' | '\'' | '"' | '0' => Parser::new_ok(ch.map(|ch| match ch {
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                '\\' => '\\',
+                '\'' => '\'',
+                '"' => '"',
+                '0' => '\0',
+                _ => unreachable!(),
+            })),
+            'u' | 'U' => char_eq_parser('{')
+                .and_then(move |brace| {
+                    integer_parser(16).map(move |hex| brace.combine(hex, |_, hex| hex))
+                })
+                .and_then(move |hex| {
+                    char_eq_parser('}').map(|brace| hex.combine(brace, |hex, _| hex))
+                })
+                .and_then(move |hex| {
+                    let Ok(hex_value) = u32::try_from(hex.value.clone()) else {
+                        return Parser::new_err(hex.map(|_| ErrorCode::UnicodeOverflow));
+                    };
+                    let Some(character) = char::from_u32(hex_value) else {
+                        return Parser::new_err(hex.map(|_| ErrorCode::InvalidUnicode));
+                    };
+                    Parser::new_ok(hex.map(|_| character))
+                }),
+            'x' | 'X' => digit_parser(16).and_then(move |first| {
+                digit_parser(16)
+                    .map(move |second| first.combine(second, |f, s| (f * 16 + s) as char))
+            }),
+            _ => Parser::new_err(ch.map(|_| ErrorCode::InvalidEscape)),
+        })
+}
+fn string_lit_parser() -> Parser<Span<String>> {
     char_eq_parser('"')
         .map(|q| q.map(|_| String::new()))
         .fold(
             move || {
-                string_eq_parser(r#"\""#)
-                    .map(|s| s.map(|_| '"'))
-                    .or_else(|_| char_match_parser(|ch| ch != '"' && ch != '\n'))
+                escape_char_parser()
+                    .or_else(|_| char_match_parser(|ch| ch != '"' && ch != '\n', ""))
             },
             move |str, ch| {
                 str.combine(ch, |mut str, ch| {
@@ -202,7 +242,7 @@ mod tests {
     #[test]
     fn text_string() {
         assert_eq!(
-            string_parser()
+            string_lit_parser()
                 .parse(Scanner::new(r#""foo""#))
                 .unwrap()
                 .1
@@ -210,7 +250,7 @@ mod tests {
             "foo"
         );
         assert_eq!(
-            string_parser()
+            string_lit_parser()
                 .parse(Scanner::new(r#""i say \"foo\"""#))
                 .unwrap()
                 .1
@@ -218,14 +258,22 @@ mod tests {
             "i say \"foo\""
         );
         assert_eq!(
-            string_parser()
+            string_lit_parser()
                 .parse(Scanner::new(r#""""#))
                 .unwrap()
                 .1
                 .value,
             ""
         );
-        assert!(string_parser()
+        assert_eq!(
+            string_lit_parser()
+                .parse(Scanner::new(r#""\n\t\r\0\'\"\u{32}\x45""#))
+                .unwrap()
+                .1
+                .value,
+            "\n\t\r\0\'\"\u{32}\x45"
+        );
+        assert!(string_lit_parser()
             .parse(Scanner::new("\"unterminated string!\n\n"))
             .is_err())
     }
