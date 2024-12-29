@@ -30,4 +30,6 @@ pub enum ErrorCode {
     ExponentOverflow,
     #[error("missing exponent")]
     MissingExponent,
+    #[error("string is not terminated")]
+    StringNotTerminated,
 }
