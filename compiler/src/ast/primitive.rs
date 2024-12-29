@@ -44,15 +44,12 @@ fn char_eq_parser(ch: char) -> Parser<Span<char>> {
         }
     })
 }
-fn char_match_parser(
-    f: impl FnOnce(char) -> bool + 'static,
-    on_error: &'static str,
-) -> Parser<Span<char>> {
+fn char_match_parser(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
     next_char_parser().and_then(move |ch| {
         if f(ch.value) {
             Parser::new_ok(ch)
         } else {
-            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch(on_error)))
+            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch))
         }
     })
 }
@@ -121,11 +118,14 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
 fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
     decimal_parser(radix).and_then(move |decimal| {
         if radix <= 10 {
-            char_match_parser(|ch| matches!(ch, 'e' | 'E'), "'e' or 'E'")
+            char_match_parser(|ch| matches!(ch, 'e' | 'E'))
         } else {
-            char_match_parser(|ch| matches!(ch, 'p' | 'P'), "'p' or 'P'")
+            char_match_parser(|ch| matches!(ch, 'p' | 'P'))
         }
-        .map(move |exp| decimal.combine(exp, |decimal, _| decimal))
+        .map({
+            let decimal = decimal.clone();
+            move |exp| decimal.combine(exp, |decimal, _| decimal)
+        })
         .and_then(move |decimal| {
             char_eq_parser('+')
                 .or_else(move |_| char_eq_parser('-'))
@@ -170,6 +170,7 @@ fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
                 })
                 .or_else(move |_| Parser::new_err(decimal.map(|_| ErrorCode::MissingExponent)))
         })
+        .or_else(move |_| Parser::new_ok(decimal))
     })
 }
 fn escape_char_parser() -> Parser<Span<char>> {
@@ -208,14 +209,14 @@ fn escape_char_parser() -> Parser<Span<char>> {
             }),
             _ => Parser::new_err(ch.map(|_| ErrorCode::InvalidEscape)),
         })
+        .map_err(|err| err.map(|code| code.map(|_| ErrorCode::MissingEscape)))
 }
 fn string_lit_parser() -> Parser<Span<String>> {
     char_eq_parser('"')
         .map(|q| q.map(|_| String::new()))
         .fold(
             move || {
-                escape_char_parser()
-                    .or_else(|_| char_match_parser(|ch| ch != '"' && ch != '\n', ""))
+                escape_char_parser().or_else(|_| char_match_parser(|ch| ch != '"' && ch != '\n'))
             },
             move |str, ch| {
                 str.combine(ch, |mut str, ch| {
@@ -228,9 +229,23 @@ fn string_lit_parser() -> Parser<Span<String>> {
             char_eq_parser('"')
                 .or_else({
                     let str = str.clone();
-                    move |_| Parser::new_err(str.map(|_| ErrorCode::StringNotTerminated))
+                    move |_| Parser::new_err(str.map(|_| ErrorCode::StringLiteralIncomplete))
                 })
                 .map(move |q| str.combine(q, |str, _| str))
+        })
+}
+fn char_lit_parser() -> Parser<Span<char>> {
+    char_eq_parser('\'')
+        .and_then(move |q| {
+            escape_char_parser()
+                .or_else(move |_| char_match_parser(|ch| ch != '\'' && ch != '\n'))
+                .map_err(move |err| err.map(|e| q.combine(e, |_, _| ErrorCode::CharLiteralEmpty)))
+                .map(move |ch| q.combine(ch, |_, ch| ch))
+        })
+        .and_then(move |ch| {
+            char_eq_parser('\'')
+                .map_err(move |err| err.map(|_| ch.map(|_| ErrorCode::CharLiteralIncomplete)))
+                .map(move |q| ch.combine(q, |ch, _| ch))
         })
 }
 
@@ -240,39 +255,35 @@ mod tests {
     use crate::ast::scanner::Scanner;
 
     #[test]
-    fn text_string() {
-        assert_eq!(
-            string_lit_parser()
-                .parse(Scanner::new(r#""foo""#))
-                .unwrap()
-                .1
-                .value,
-            "foo"
-        );
-        assert_eq!(
-            string_lit_parser()
-                .parse(Scanner::new(r#""i say \"foo\"""#))
-                .unwrap()
-                .1
-                .value,
-            "i say \"foo\""
-        );
-        assert_eq!(
-            string_lit_parser()
-                .parse(Scanner::new(r#""""#))
-                .unwrap()
-                .1
-                .value,
-            ""
-        );
-        assert_eq!(
-            string_lit_parser()
-                .parse(Scanner::new(r#""\n\t\r\0\'\"\u{32}\x45""#))
-                .unwrap()
-                .1
-                .value,
-            "\n\t\r\0\'\"\u{32}\x45"
-        );
+    fn test_character() {
+        let tests = [r"'a'", r"'\n'", r"'字'", r"'\u{5B57}'", r"'\x34'"];
+        let answers = ['a', '\n', '字', '\u{5B57}', '\x34'];
+        for (test, answer) in tests.into_iter().zip(answers) {
+            assert_eq!(
+                char_lit_parser().parse(Scanner::new(test)).unwrap().1.value,
+                answer
+            );
+        }
+    }
+    #[test]
+    fn test_string() {
+        let tests = [
+            r#""foo""#,
+            r#""i say \"foo\"""#,
+            r#""""#,
+            r#""\n\t\r\0\'\"\u{32}\x45""#,
+        ];
+        let answers = ["foo", "i say \"foo\"", "", "\n\t\r\0\'\"\u{32}\x45"];
+        for (test, answer) in tests.into_iter().zip(answers) {
+            assert_eq!(
+                string_lit_parser()
+                    .parse(Scanner::new(test))
+                    .unwrap()
+                    .1
+                    .value,
+                answer
+            );
+        }
         assert!(string_lit_parser()
             .parse(Scanner::new("\"unterminated string!\n\n"))
             .is_err())

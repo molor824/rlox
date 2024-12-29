@@ -6,8 +6,8 @@ use crate::span::Span;
 
 #[derive(Clone, Debug)]
 pub struct Error {
-    source: Rc<str>,
-    code: Span<ErrorCode>,
+    pub source: Rc<str>,
+    pub code: Span<ErrorCode>,
 }
 impl Error {
     pub const fn new(source: Rc<str>, code: Span<ErrorCode>) -> Self {
@@ -30,16 +30,22 @@ pub enum ErrorCode {
     ExpectedChar(char),
     #[error("expected integer")]
     ExpectedInt,
-    #[error("character does not match {0}")]
-    CharNotMatch(&'static str),
+    #[error("character does not match")]
+    CharNotMatch,
     #[error("character is not a digit")]
     CharNotDigit,
     #[error("exponent overflow")]
     ExponentOverflow,
     #[error("missing exponent")]
     MissingExponent,
-    #[error("string is not terminated")]
-    StringNotTerminated,
+    #[error("string literal is not terminated")]
+    StringLiteralIncomplete,
+    #[error("character literal is not terminated")]
+    CharLiteralIncomplete,
+    #[error("expected character in character literal")]
+    CharLiteralEmpty,
+    #[error("missing escape character '\\'")]
+    MissingEscape,
     #[error("invalid escape character")]
     InvalidEscape,
     #[error("unicode overflow")]
