@@ -173,6 +173,21 @@ fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
         .or_else(move |_| Parser::new_ok(decimal))
     })
 }
+fn radix_parser() -> Parser<Span<u32>> {
+    char_eq_parser('0').and_then(move |zero| {
+        char_eq_parser('b')
+            .map(|ch| ch.map(|_| 2_u32))
+            .or_else(|_| char_eq_parser('o').map(|ch| ch.map(|_| 8_u32)))
+            .or_else(|_| char_eq_parser('x').map(|ch| ch.map(|_| 16_u32)))
+            .map(move |radix| zero.combine(radix, |_, radix| radix))
+            .map_err(|err| err.map(|c| c.map(|_| ErrorCode::ExpectedBase)))
+    })
+}
+fn number_parser() -> Parser<Span<NumberToken>> {
+    radix_parser()
+        .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
+        .or_else(|_| exponent_parser(10))
+}
 fn escape_char_parser() -> Parser<Span<char>> {
     char_eq_parser('\\')
         .and_then(|slash| next_char_parser().map(move |ch| slash.combine(ch, |_, ch| ch)))
@@ -289,42 +304,94 @@ mod tests {
             .is_err())
     }
     #[test]
-    fn test_exponent() {
-        assert_eq!(
-            exponent_parser(10)
-                .parse(Scanner::new("3.5E-4"))
-                .unwrap()
-                .1
-                .value,
+    fn test_number() {
+        let tests = [
+            "3",
+            "0xf4",
+            "0b1001",
+            "0o123",
+            "3.14",
+            "0x3.f",
+            "0b0.1",
+            "0o1.7",
+            "314e-2",
+            "0.314E1",
+            "0x3.fp-f",
+            "0b0.1e+10",
+            "0o1.7e-10",
+        ];
+        let answers = [
             NumberToken {
                 radix: 10,
-                integer: BigUint::from(35_u32),
-                exponent: Some(-1 - 4),
-            }
-        );
-        assert_eq!(
-            exponent_parser(10)
-                .parse(Scanner::new("0.53e+2"))
-                .unwrap()
-                .1
-                .value,
-            NumberToken {
-                radix: 10,
-                integer: BigUint::from(053_u32),
-                exponent: Some(-2 + 2),
-            }
-        );
-        assert_eq!(
-            exponent_parser(16)
-                .parse(Scanner::new("E.3pFF"))
-                .unwrap()
-                .1
-                .value,
+                integer: 3_u32.into(),
+                exponent: None,
+            },
             NumberToken {
                 radix: 16,
-                integer: BigUint::from(0xe3_u32),
-                exponent: Some(-1 + 0xff),
-            }
-        );
+                integer: 0xf4_u32.into(),
+                exponent: None,
+            },
+            NumberToken {
+                radix: 2,
+                integer: 0b1001_u32.into(),
+                exponent: None,
+            },
+            NumberToken {
+                radix: 8,
+                integer: 0o123_u32.into(),
+                exponent: None,
+            },
+            NumberToken {
+                radix: 10,
+                integer: 314_u32.into(),
+                exponent: Some(-2),
+            },
+            NumberToken {
+                radix: 16,
+                integer: 0x3f_u32.into(),
+                exponent: Some(-1),
+            },
+            NumberToken {
+                radix: 2,
+                integer: 0b0_1_u32.into(),
+                exponent: Some(-1),
+            },
+            NumberToken {
+                radix: 8,
+                integer: 0o1_7_u32.into(),
+                exponent: Some(-1),
+            },
+            NumberToken {
+                radix: 10,
+                integer: 314_u32.into(),
+                exponent: Some(-2),
+            },
+            NumberToken {
+                radix: 10,
+                integer: 314_u32.into(),
+                exponent: Some(-2),
+            },
+            NumberToken {
+                radix: 16,
+                integer: 0x3f_u32.into(),
+                exponent: Some(-1 - 0xf),
+            },
+            NumberToken {
+                radix: 2,
+                integer: 0b0_1_u32.into(),
+                exponent: Some(-1 + 0b10),
+            },
+            NumberToken {
+                radix: 8,
+                integer: 0o1_7_u32.into(),
+                exponent: Some(-1 - 0o10),
+            },
+        ];
+        for (test, answer) in tests.into_iter().zip(answers) {
+            assert_eq!(
+                number_parser().parse(Scanner::new(test)).unwrap().1.value,
+                answer
+            );
+        }
     }
 }
