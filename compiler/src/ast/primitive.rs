@@ -65,7 +65,10 @@ fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
         .map_err(|e| e.map(|c| c.map(|_| ErrorCode::ExpectedInt)))
         .map(|d| d.map(|d| BigUint::from(d)))
         .fold(
-            move || digit_parser(radix),
+            move || {
+                digit_parser(radix)
+                    .or_else(move |_| char_eq_parser('_').and_then(move |_| digit_parser(radix)))
+            },
             move |acc, digit| {
                 acc.combine(digit, |mut acc, d| {
                     acc *= radix;
@@ -308,7 +311,7 @@ mod tests {
         let tests = [
             "3",
             "0xf4",
-            "0b1001",
+            "0b1_001",
             "0o123",
             "3.14",
             "0x3.f",
