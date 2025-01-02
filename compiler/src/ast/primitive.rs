@@ -335,16 +335,20 @@ mod tests {
             " \n\t\r",
             "// line comment\nsomething else",
             "/* block\n comment */something else",
-            "/* incomplete comment",
-            "// incomplete comment",
+            "//\n",
+            "/**/",
+            "/*",
+            "//",
         ];
         let answers = [
             "  ",
             " \n\t\r",
             "// line comment\n",
             "/* block\n comment */",
-            "/* incomplete comment",
-            "// incomplete comment",
+            "//\n",
+            "/**/",
+            "/*",
+            "//",
         ];
         for (test, answer) in tests.into_iter().zip(answers) {
             let (next, result) = skip_parser().parse(Scanner::new(test)).unwrap();
