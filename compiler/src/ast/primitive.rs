@@ -18,19 +18,19 @@ fn next_char_parser() -> Parser<Span<char>> {
     })
 }
 fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
-    Parser::new(move |scanner| {
-        if scanner.source[scanner.offset..].starts_with(string) {
+    Parser::new(move |Scanner { source, offset }| {
+        if source[offset..].starts_with(string) {
             Ok((
                 Scanner {
-                    offset: scanner.offset + string.len(),
-                    source: scanner.source,
+                    offset: offset + string.len(),
+                    source,
                 },
-                Span::new(scanner.offset, scanner.offset + string.len(), string),
+                Span::new(offset, offset + string.len(), string),
             ))
         } else {
             Err(Error::new(
-                scanner.source,
-                Span::from_len(scanner.offset, 0, ErrorCode::ExpectedToken(string)),
+                source,
+                Span::from_len(offset, 0, ErrorCode::ExpectedToken(string)),
             ))
         }
     })
@@ -266,12 +266,91 @@ fn char_lit_parser() -> Parser<Span<char>> {
                 .map(move |q| ch.combine(q, |ch, _| ch))
         })
 }
+fn string_not_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
+    Parser::new(move |Scanner { source, offset }| {
+        if source[offset..].starts_with(string) {
+            let len = source.len();
+            Err(Error::new(
+                source,
+                Span::from_len(offset, len, ErrorCode::UnexpectedToken(string)),
+            ))
+        } else {
+            Ok((
+                Scanner { source, offset },
+                Span::from_len(offset, 0, string),
+            ))
+        }
+    })
+}
+fn whitespace_parser() -> Parser<Span<()>> {
+    char_match_parser(|ch| ch.is_whitespace()).map(|ch| ch.map(|_| ()))
+}
+fn line_comment_parser() -> Parser<Span<()>> {
+    string_eq_parser("//").and_then(|comment| {
+        char_match_parser(|ch| ch != '\n')
+            .map(move |ch| comment.combine(ch, |_, _| ()))
+            .or_else(move |_| Parser::new_ok(comment.map(|_| ())))
+            .fold(
+                || char_match_parser(|ch| ch != '\n'),
+                |ch, ch1| ch.combine(ch1, |_, _| ()),
+            )
+    })
+}
+fn block_comment_parser() -> Parser<Span<()>> {
+    string_eq_parser("/*").and_then(|comment| {
+        string_not_eq_parser("*/")
+            .map(move |_| comment.map(|_| ()))
+            .or_else(move |_| Parser::new_ok(comment.map(|_| ())))
+            .fold(
+                move || string_not_eq_parser("*/").and_then(move |_| next_char_parser()),
+                |comment, ch| comment.combine(ch, |_, _| ()),
+            )
+            .and_then(|comment| {
+                string_eq_parser("*/")
+                    .map(move |end| comment.combine(end, |_, _| ()))
+                    .or_else(move |_| Parser::new_ok(comment))
+            })
+    })
+}
+fn skip_parser() -> Parser<Span<()>> {
+    fn one_of() -> Parser<Span<()>> {
+        whitespace_parser()
+            .or_else(|_| line_comment_parser())
+            .or_else(|_| block_comment_parser())
+    }
+    one_of()
+        .fold(one_of, |a, b| Span::new(a.start, b.end, ()))
+        .or_else(|err| Parser::new_ok(Span::from_len(err.code.start, 0, ())))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::scanner::Scanner;
 
+    #[test]
+    fn test_skip() {
+        let tests = [
+            "  ",
+            " \n\t\r",
+            "// line comment\nsomething else",
+            "/* block\n comment */something else",
+            "/* incomplete comment",
+            "// incomplete comment",
+        ];
+        let answers = [
+            "  ",
+            " \n\t\r",
+            "// line comment\n",
+            "/* block\n comment */",
+            "/* incomplete comment",
+            "// incomplete comment",
+        ];
+        for (test, answer) in tests.into_iter().zip(answers) {
+            let (next, result) = skip_parser().parse(Scanner::new(test)).unwrap();
+            assert_eq!(&next.source[result.start..result.end], answer);
+        }
+    }
     #[test]
     fn test_character() {
         let tests = [r"'a'", r"'\n'", r"'字'", r"'\u{5B57}'", r"'\x34'"];

@@ -26,6 +26,8 @@ pub enum ErrorCode {
     Eof,
     #[error("expected token {0:?}")]
     ExpectedToken(&'static str),
+    #[error("unexpected token {0:?}")]
+    UnexpectedToken(&'static str),
     #[error("expected character {0:?}")]
     ExpectedChar(char),
     #[error("expected base prefix (one of b, o, x)")]
