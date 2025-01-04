@@ -318,9 +318,19 @@ fn skip_parser() -> Parser<Span<()>> {
             .or_else(|_| line_comment_parser())
             .or_else(|_| block_comment_parser())
     }
-    one_of()
-        .fold(one_of, |a, b| Span::new(a.start, b.end, ()))
-        .or_else(|err| Parser::new_ok(Span::from_len(err.code.start, 0, ())))
+    one_of().fold(one_of, |a, b| a.combine(b, |_, _| ()))
+}
+fn ident_parser() -> Parser<Span<String>> {
+    char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
+        .fold(
+            || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_'),
+            |a, b| a.combine(b, |_, _| '\0'),
+        )
+        .and_then(|ident| {
+            Parser::new_ok_with(move |scanner| {
+                ident.map(|_| scanner.source[ident.start..ident.end].to_string())
+            })
+        })
 }
 
 #[cfg(test)]
@@ -328,6 +338,18 @@ mod tests {
     use super::*;
     use crate::ast::scanner::Scanner;
 
+    #[test]
+    fn test_ident() {
+        let tests = ["normal", "_underscore", "a1234", "__123__"];
+        let answers = ["normal", "_underscore", "a1234", "__123__"];
+
+        for (test, answer) in tests.into_iter().zip(answers) {
+            assert_eq!(
+                ident_parser().parse(Scanner::new(test)).unwrap().1.value,
+                answer
+            );
+        }
+    }
     #[test]
     fn test_skip() {
         let tests = [

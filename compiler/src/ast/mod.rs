@@ -22,6 +22,9 @@ impl<T: 'static> Parser<T> {
     pub fn new_ok(result: T) -> Self {
         Self::new(move |scanner| Ok((scanner, result)))
     }
+    pub fn new_ok_with(f: impl FnOnce(Scanner) -> T + 'static) -> Self {
+        Self::new(move |scanner| Ok((scanner.clone(), f(scanner))))
+    }
     pub fn new_err(code: Span<ErrorCode>) -> Self {
         Self::new(move |scanner| Err(Error::new(scanner.source, code)))
     }
