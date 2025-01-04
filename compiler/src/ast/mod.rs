@@ -4,6 +4,7 @@ use scanner::Scanner;
 use crate::span::Span;
 
 mod error;
+mod primary;
 mod primitive;
 mod scanner;
 

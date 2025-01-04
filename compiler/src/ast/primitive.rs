@@ -8,6 +8,13 @@ use super::{
     Parser,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NumberToken {
+    pub radix: u32,
+    pub integer: BigUint,
+    pub exponent: Option<i32>,
+}
+
 fn next_char_parser() -> Parser<Span<char>> {
     Parser::new(|scanner| match scanner.clone().next() {
         Some((next, ch, offset)) => Ok((next, Span::new(offset, offset + ch.len_utf8(), ch))),
@@ -77,12 +84,6 @@ fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
                 })
             },
         )
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct NumberToken {
-    pub radix: u32,
-    pub integer: BigUint,
-    pub exponent: Option<i32>,
 }
 fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
     integer_parser(radix).and_then(move |whole| {
@@ -186,7 +187,7 @@ fn radix_parser() -> Parser<Span<u32>> {
             .map_err(|err| err.map(|c| c.map(|_| ErrorCode::ExpectedBase)))
     })
 }
-fn number_parser() -> Parser<Span<NumberToken>> {
+pub fn number_parser() -> Parser<Span<NumberToken>> {
     radix_parser()
         .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
         .or_else(|_| exponent_parser(10))
@@ -229,7 +230,7 @@ fn escape_char_parser() -> Parser<Span<char>> {
         })
         .map_err(|err| err.map(|code| code.map(|_| ErrorCode::MissingEscape)))
 }
-fn string_lit_parser() -> Parser<Span<String>> {
+pub fn string_lit_parser() -> Parser<Span<String>> {
     char_eq_parser('"')
         .map(|q| q.map(|_| String::new()))
         .fold(
@@ -252,7 +253,7 @@ fn string_lit_parser() -> Parser<Span<String>> {
                 .map(move |q| str.combine(q, |str, _| str))
         })
 }
-fn char_lit_parser() -> Parser<Span<char>> {
+pub fn char_lit_parser() -> Parser<Span<char>> {
     char_eq_parser('\'')
         .and_then(move |q| {
             escape_char_parser()
@@ -312,7 +313,7 @@ fn block_comment_parser() -> Parser<Span<()>> {
             })
     })
 }
-fn skip_parser() -> Parser<Span<()>> {
+pub fn skip_parser() -> Parser<Span<()>> {
     fn one_of() -> Parser<Span<()>> {
         whitespace_parser()
             .or_else(|_| line_comment_parser())
@@ -320,7 +321,7 @@ fn skip_parser() -> Parser<Span<()>> {
     }
     one_of().fold(one_of, |a, b| a.combine(b, |_, _| ()))
 }
-fn ident_parser() -> Parser<Span<String>> {
+pub fn ident_parser() -> Parser<Span<String>> {
     char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
         .fold(
             || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_'),
