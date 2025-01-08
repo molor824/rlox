@@ -4,9 +4,11 @@ use scanner::Scanner;
 use crate::span::Span;
 
 mod error;
+mod expression;
 mod primary;
 mod primitive;
 mod scanner;
+mod unary;
 
 pub type ParseResult<T> = Result<(Scanner, T), Error>;
 
@@ -67,4 +69,49 @@ impl<T: 'static> Parser<T> {
             })
         })
     }
+}
+fn next_char_parser() -> Parser<Span<char>> {
+    Parser::new(|scanner| match scanner.clone().next() {
+        Some((next, ch, offset)) => Ok((next, Span::new(offset, offset + ch.len_utf8(), ch))),
+        None => Err(Error::new(
+            scanner.source,
+            Span::from_len(scanner.offset, 0, ErrorCode::Eof),
+        )),
+    })
+}
+fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
+    Parser::new(move |Scanner { source, offset }| {
+        if source[offset..].starts_with(string) {
+            Ok((
+                Scanner {
+                    offset: offset + string.len(),
+                    source,
+                },
+                Span::new(offset, offset + string.len(), string),
+            ))
+        } else {
+            Err(Error::new(
+                source,
+                Span::from_len(offset, 0, ErrorCode::ExpectedToken(string)),
+            ))
+        }
+    })
+}
+fn char_eq_parser(ch: char) -> Parser<Span<char>> {
+    next_char_parser().and_then(move |char| {
+        if char.value == ch {
+            Parser::new_ok(char)
+        } else {
+            Parser::new_err(char.map(|_| ErrorCode::ExpectedChar(ch)))
+        }
+    })
+}
+fn char_match_parser(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
+    next_char_parser().and_then(move |ch| {
+        if f(ch.value) {
+            Parser::new_ok(ch)
+        } else {
+            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch))
+        }
+    })
 }

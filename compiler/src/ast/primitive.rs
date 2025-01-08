@@ -1,65 +1,11 @@
 use num_bigint::{BigInt, BigUint};
 
-use crate::span::Span;
-
 use super::{
     error::{Error, ErrorCode},
+    expression::Number,
     scanner::Scanner,
-    Parser,
+    *,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NumberToken {
-    pub radix: u32,
-    pub integer: BigUint,
-    pub exponent: Option<i32>,
-}
-
-fn next_char_parser() -> Parser<Span<char>> {
-    Parser::new(|scanner| match scanner.clone().next() {
-        Some((next, ch, offset)) => Ok((next, Span::new(offset, offset + ch.len_utf8(), ch))),
-        None => Err(Error::new(
-            scanner.source,
-            Span::from_len(scanner.offset, 0, ErrorCode::Eof),
-        )),
-    })
-}
-fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
-    Parser::new(move |Scanner { source, offset }| {
-        if source[offset..].starts_with(string) {
-            Ok((
-                Scanner {
-                    offset: offset + string.len(),
-                    source,
-                },
-                Span::new(offset, offset + string.len(), string),
-            ))
-        } else {
-            Err(Error::new(
-                source,
-                Span::from_len(offset, 0, ErrorCode::ExpectedToken(string)),
-            ))
-        }
-    })
-}
-fn char_eq_parser(ch: char) -> Parser<Span<char>> {
-    next_char_parser().and_then(move |char| {
-        if char.value == ch {
-            Parser::new_ok(char)
-        } else {
-            Parser::new_err(char.map(|_| ErrorCode::ExpectedChar(ch)))
-        }
-    })
-}
-fn char_match_parser(f: impl FnOnce(char) -> bool + 'static) -> Parser<Span<char>> {
-    next_char_parser().and_then(move |ch| {
-        if f(ch.value) {
-            Parser::new_ok(ch)
-        } else {
-            Parser::new_err(ch.map(|_| ErrorCode::CharNotMatch))
-        }
-    })
-}
 
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
     next_char_parser().and_then(move |ch| match ch.value.to_digit(radix) {
@@ -85,7 +31,7 @@ fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
             },
         )
 }
-fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
+fn decimal_parser(radix: u32) -> Parser<Span<Number>> {
     integer_parser(radix).and_then(move |whole| {
         char_eq_parser('.')
             .and_then(move |dot| {
@@ -97,7 +43,7 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
                 let whole = whole.clone();
                 move |frac| {
                     let frac_len = frac.end - frac.start - 1;
-                    whole.combine(frac, |wh, fr| NumberToken {
+                    whole.combine(frac, |wh, fr| Number {
                         radix,
                         integer: {
                             let mut integer = wh;
@@ -111,7 +57,7 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
                 }
             })
             .or_else(move |_| {
-                Parser::new_ok(whole.map(|whole| NumberToken {
+                Parser::new_ok(whole.map(|whole| Number {
                     radix,
                     integer: whole,
                     exponent: None,
@@ -119,7 +65,7 @@ fn decimal_parser(radix: u32) -> Parser<Span<NumberToken>> {
             })
     })
 }
-fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
+fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
     decimal_parser(radix).and_then(move |decimal| {
         if radix <= 10 {
             char_match_parser(|ch| matches!(ch, 'e' | 'E'))
@@ -164,7 +110,7 @@ fn exponent_parser(radix: u32) -> Parser<Span<NumberToken>> {
                         Parser::new_ok(Span::new(
                             decimal.start,
                             exponent.end,
-                            NumberToken {
+                            Number {
                                 radix: decimal.value.radix,
                                 integer: decimal.value.integer,
                                 exponent: Some(exp),
@@ -187,7 +133,7 @@ fn radix_parser() -> Parser<Span<u32>> {
             .map_err(|err| err.map(|c| c.map(|_| ErrorCode::ExpectedBase)))
     })
 }
-pub fn number_parser() -> Parser<Span<NumberToken>> {
+pub fn number_parser() -> Parser<Span<Number>> {
     radix_parser()
         .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
         .or_else(|_| exponent_parser(10))
@@ -319,7 +265,9 @@ pub fn skip_parser() -> Parser<Span<()>> {
             .or_else(|_| line_comment_parser())
             .or_else(|_| block_comment_parser())
     }
-    one_of().fold(one_of, |a, b| a.combine(b, |_, _| ()))
+    one_of()
+        .fold(one_of, |a, b| a.combine(b, |_, _| ()))
+        .or_else(|e| Parser::new_ok(Span::from_len(e.code.start, 0, ())))
 }
 pub fn ident_parser() -> Parser<Span<String>> {
     char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
@@ -430,67 +378,67 @@ mod tests {
             "0o1.7e-10",
         ];
         let answers = [
-            NumberToken {
+            Number {
                 radix: 10,
                 integer: 3_u32.into(),
                 exponent: None,
             },
-            NumberToken {
+            Number {
                 radix: 16,
                 integer: 0xf4_u32.into(),
                 exponent: None,
             },
-            NumberToken {
+            Number {
                 radix: 2,
                 integer: 0b1001_u32.into(),
                 exponent: None,
             },
-            NumberToken {
+            Number {
                 radix: 8,
                 integer: 0o123_u32.into(),
                 exponent: None,
             },
-            NumberToken {
+            Number {
                 radix: 10,
                 integer: 314_u32.into(),
                 exponent: Some(-2),
             },
-            NumberToken {
+            Number {
                 radix: 16,
                 integer: 0x3f_u32.into(),
                 exponent: Some(-1),
             },
-            NumberToken {
+            Number {
                 radix: 2,
                 integer: 0b0_1_u32.into(),
                 exponent: Some(-1),
             },
-            NumberToken {
+            Number {
                 radix: 8,
                 integer: 0o1_7_u32.into(),
                 exponent: Some(-1),
             },
-            NumberToken {
+            Number {
                 radix: 10,
                 integer: 314_u32.into(),
                 exponent: Some(-2),
             },
-            NumberToken {
+            Number {
                 radix: 10,
                 integer: 314_u32.into(),
                 exponent: Some(-2),
             },
-            NumberToken {
+            Number {
                 radix: 16,
                 integer: 0x3f_u32.into(),
                 exponent: Some(-1 - 0xf),
             },
-            NumberToken {
+            Number {
                 radix: 2,
                 integer: 0b0_1_u32.into(),
                 exponent: Some(-1 + 0b10),
             },
-            NumberToken {
+            Number {
                 radix: 8,
                 integer: 0o1_7_u32.into(),
                 exponent: Some(-1 - 0o10),

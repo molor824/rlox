@@ -1,31 +1,13 @@
-use crate::{
-    ast::primitive::{
-        char_lit_parser, ident_parser, number_parser, skip_parser, string_lit_parser,
-    },
-    span::Span,
-};
+use super::{expression::*, primitive::*, Parser, Span};
 
-use super::{primitive::NumberToken, Parser};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Primary {
-    Ident(String),
-    CharLit(char),
-    StrLit(String),
-    Number(NumberToken),
-}
-
-pub fn primary_parser() -> Parser<Span<Primary>> {
-    fn _primary() -> Parser<Span<Primary>> {
+pub fn primary_parser() -> Parser<Expression> {
+    skip_parser().and_then(|_| {
         number_parser()
-            .map(|n| n.map(Primary::Number))
-            .or_else(|_| char_lit_parser().map(|c| c.map(Primary::CharLit)))
-            .or_else(|_| string_lit_parser().map(|s| s.map(Primary::StrLit)))
-            .or_else(|_| ident_parser().map(|i| i.map(Primary::Ident)))
-    }
-    skip_parser()
-        .and_then(|_| _primary())
-        .or_else(|_| _primary())
+            .map(Expression::Number)
+            .or_else(|_| char_lit_parser().map(Expression::CharLit))
+            .or_else(|_| string_lit_parser().map(Expression::StrLit))
+            .or_else(|_| ident_parser().map(Expression::Ident))
+    })
 }
 
 #[cfg(test)]
@@ -36,27 +18,47 @@ mod tests {
 
     #[test]
     fn primary_test() {
-        let test = "/* comment */ 3.21 ident 0xff \"a string test!\\n\" 'p'";
-        let answers = [
-            Primary::Number(NumberToken {
-                radix: 10,
-                integer: 321_u32.into(),
-                exponent: Some(-2),
-            }),
-            Primary::Ident("ident".to_string()),
-            Primary::Number(NumberToken {
-                radix: 16,
-                integer: 0xff_u32.into(),
-                exponent: None,
-            }),
-            Primary::StrLit("a string test!\n".to_string()),
-            Primary::CharLit('p'),
+        let tests = [
+            "/* comment */ 3.21",
+            " ident",
+            " 0xff",
+            " \"a string test!\\n\"",
+            "'p'",
         ];
-        let mut scanner = Scanner::new(test);
-        for answer in answers {
-            let (next, result) = primary_parser().parse(scanner).unwrap();
-            assert_eq!(result.value, answer);
-            scanner = next;
+        let answers = [
+            Expression::Number(Span::from_len(
+                "/* comment */ ".len(),
+                "3.21".len(),
+                Number {
+                    radix: 10,
+                    integer: 321_u32.into(),
+                    exponent: Some(-2),
+                },
+            )),
+            Expression::Ident(Span::from_len(
+                " ".len(),
+                "ident".len(),
+                "ident".to_string(),
+            )),
+            Expression::Number(Span::from_len(
+                " ".len(),
+                "0xff".len(),
+                Number {
+                    radix: 16,
+                    integer: 0xff_u32.into(),
+                    exponent: None,
+                },
+            )),
+            Expression::StrLit(Span::from_len(
+                " ".len(),
+                "\"a string test!\\n\"".len(),
+                "a string test!\n".to_string(),
+            )),
+            Expression::CharLit(Span::new("".len(), "'p'".len(), 'p')),
+        ];
+        for (test, answer) in tests.into_iter().zip(answers) {
+            let (_, result) = primary_parser().parse(Scanner::new(test)).unwrap();
+            assert_eq!(result, answer);
         }
     }
 }

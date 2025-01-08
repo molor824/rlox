@@ -30,6 +30,8 @@ pub enum ErrorCode {
     UnexpectedToken(&'static str),
     #[error("expected character {0:?}")]
     ExpectedChar(char),
+    #[error("expected primary expression")]
+    ExpectedPrimary,
     #[error("expected base prefix (one of b, o, x)")]
     ExpectedBase,
     #[error("expected integer")]
