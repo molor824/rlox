@@ -1,21 +1,16 @@
 use num_bigint::{BigInt, BigUint};
 
-use super::{
-    error::{Error, ErrorCode},
-    expression::Number,
-    scanner::Scanner,
-    *,
-};
+use super::{error::Error, expression::Number, scanner::Scanner, *};
 
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
     next_char_parser().and_then(move |ch| match ch.value.to_digit(radix) {
         Some(d) => Parser::new_ok(ch.map(|_| d as u8)),
-        None => Parser::new_err(ch.map(|_| ErrorCode::CharNotDigit)),
+        None => Parser::new_err(ch.map(|_| Error::CharNotDigit)),
     })
 }
 fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
     digit_parser(radix)
-        .map_err(|e| e.map(|c| c.map(|_| ErrorCode::ExpectedInt)))
+        .map_err(|e| e.map(|_| Error::ExpectedInt))
         .map(|d| d.map(|d| BigUint::from(d)))
         .fold(
             move || {
@@ -68,9 +63,9 @@ fn decimal_parser(radix: u32) -> Parser<Span<Number>> {
 fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
     decimal_parser(radix).and_then(move |decimal| {
         if radix <= 10 {
-            char_match_parser(|ch| matches!(ch, 'e' | 'E'))
+            chars_eq_parser(&['e', 'E'])
         } else {
-            char_match_parser(|ch| matches!(ch, 'p' | 'P'))
+            chars_eq_parser(&['p', 'P'])
         }
         .map({
             let decimal = decimal.clone();
@@ -103,7 +98,7 @@ fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
                                 return Parser::new_err(Span::new(
                                     exponent.start,
                                     exponent.end,
-                                    ErrorCode::ExponentOverflow,
+                                    Error::ExponentOverflow,
                                 ))
                             }
                         };
@@ -118,7 +113,7 @@ fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
                         ))
                     }
                 })
-                .or_else(move |_| Parser::new_err(decimal.map(|_| ErrorCode::MissingExponent)))
+                .or_else(move |_| Parser::new_err(decimal.map(|_| Error::MissingExponent)))
         })
         .or_else(move |_| Parser::new_ok(decimal))
     })
@@ -130,13 +125,15 @@ fn radix_parser() -> Parser<Span<u32>> {
             .or_else(|_| char_eq_parser('o').map(|ch| ch.map(|_| 8_u32)))
             .or_else(|_| char_eq_parser('x').map(|ch| ch.map(|_| 16_u32)))
             .map(move |radix| zero.combine(radix, |_, radix| radix))
-            .map_err(|err| err.map(|c| c.map(|_| ErrorCode::ExpectedBase)))
+            .map_err(|err| err.map(|_| Error::ExpectedBase))
     })
 }
 pub fn number_parser() -> Parser<Span<Number>> {
-    radix_parser()
-        .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
-        .or_else(|_| exponent_parser(10))
+    skip_parser().and_then(|_| {
+        radix_parser()
+            .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
+            .or_else(|_| exponent_parser(10))
+    })
 }
 fn escape_char_parser() -> Parser<Span<char>> {
     char_eq_parser('\\')
@@ -161,10 +158,10 @@ fn escape_char_parser() -> Parser<Span<char>> {
                 })
                 .and_then(move |hex| {
                     let Ok(hex_value) = u32::try_from(hex.value.clone()) else {
-                        return Parser::new_err(hex.map(|_| ErrorCode::UnicodeOverflow));
+                        return Parser::new_err(hex.map(|_| Error::UnicodeOverflow));
                     };
                     let Some(character) = char::from_u32(hex_value) else {
-                        return Parser::new_err(hex.map(|_| ErrorCode::InvalidUnicode));
+                        return Parser::new_err(hex.map(|_| Error::InvalidUnicode));
                     };
                     Parser::new_ok(hex.map(|_| character))
                 }),
@@ -172,54 +169,60 @@ fn escape_char_parser() -> Parser<Span<char>> {
                 digit_parser(16)
                     .map(move |second| first.combine(second, |f, s| (f * 16 + s) as char))
             }),
-            _ => Parser::new_err(ch.map(|_| ErrorCode::InvalidEscape)),
+            _ => Parser::new_err(ch.map(|_| Error::InvalidEscape)),
         })
-        .map_err(|err| err.map(|code| code.map(|_| ErrorCode::MissingEscape)))
+        .map_err(|err| err.map(|_| Error::MissingEscape))
 }
 pub fn string_lit_parser() -> Parser<Span<String>> {
-    char_eq_parser('"')
-        .map(|q| q.map(|_| String::new()))
-        .fold(
-            move || {
-                escape_char_parser().or_else(|_| char_match_parser(|ch| ch != '"' && ch != '\n'))
-            },
-            move |str, ch| {
-                str.combine(ch, |mut str, ch| {
-                    str.push(ch);
-                    str
-                })
-            },
-        )
-        .and_then(move |str| {
-            char_eq_parser('"')
-                .or_else({
-                    let str = str.clone();
-                    move |_| Parser::new_err(str.map(|_| ErrorCode::StringLiteralIncomplete))
-                })
-                .map(move |q| str.combine(q, |str, _| str))
-        })
+    skip_parser().and_then(|_| {
+        char_eq_parser('"')
+            .map(|q| q.map(|_| String::new()))
+            .fold(
+                move || {
+                    escape_char_parser()
+                        .or_else(|_| char_match_parser(|ch| ch != '"' && ch != '\n'))
+                },
+                move |str, ch| {
+                    str.combine(ch, |mut str, ch| {
+                        str.push(ch);
+                        str
+                    })
+                },
+            )
+            .and_then(move |str| {
+                char_eq_parser('"')
+                    .or_else({
+                        let str = str.clone();
+                        move |_| Parser::new_err(str.map(|_| Error::StringLiteralIncomplete))
+                    })
+                    .map(move |q| str.combine(q, |str, _| str))
+            })
+    })
 }
 pub fn char_lit_parser() -> Parser<Span<char>> {
-    char_eq_parser('\'')
-        .and_then(move |q| {
-            escape_char_parser()
-                .or_else(move |_| char_match_parser(|ch| ch != '\'' && ch != '\n'))
-                .map_err(move |err| err.map(|e| q.combine(e, |_, _| ErrorCode::CharLiteralEmpty)))
-                .map(move |ch| q.combine(ch, |_, ch| ch))
-        })
-        .and_then(move |ch| {
-            char_eq_parser('\'')
-                .map_err(move |err| err.map(|_| ch.map(|_| ErrorCode::CharLiteralIncomplete)))
-                .map(move |q| ch.combine(q, |ch, _| ch))
-        })
+    skip_parser().and_then(|_| {
+        char_eq_parser('\'')
+            .and_then(move |q| {
+                escape_char_parser()
+                    .or_else(move |_| char_match_parser(|ch| ch != '\'' && ch != '\n'))
+                    .map_err(move |err| q.combine(err, |_, _| Error::CharLiteralEmpty))
+                    .map(move |ch| q.combine(ch, |_, ch| ch))
+            })
+            .and_then(move |ch| {
+                char_eq_parser('\'')
+                    .map_err(move |err| err.map(|_| Error::CharLiteralIncomplete))
+                    .map(move |q| ch.combine(q, |ch, _| ch))
+            })
+    })
 }
 fn string_not_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
     Parser::new(move |Scanner { source, offset }| {
-        if source[offset..].starts_with(string) {
+        if source[offset..].starts_with(&string) {
             let len = source.len();
-            Err(Error::new(
-                source,
-                Span::from_len(offset, len, ErrorCode::UnexpectedToken(string)),
+            Err(Span::from_len(
+                offset,
+                len,
+                Error::UnexpectedString(string.to_string()),
             ))
         } else {
             Ok((
@@ -267,19 +270,21 @@ pub fn skip_parser() -> Parser<Span<()>> {
     }
     one_of()
         .fold(one_of, |a, b| a.combine(b, |_, _| ()))
-        .or_else(|e| Parser::new_ok(Span::from_len(e.code.start, 0, ())))
+        .or_else(|e| Parser::new_ok(Span::from_len(e.start, 0, ())))
 }
 pub fn ident_parser() -> Parser<Span<String>> {
-    char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
-        .fold(
-            || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_'),
-            |a, b| a.combine(b, |_, _| '\0'),
-        )
-        .and_then(|ident| {
-            Parser::new_ok_with(move |scanner| {
-                ident.map(|_| scanner.source[ident.start..ident.end].to_string())
+    skip_parser().and_then(|_| {
+        char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
+            .fold(
+                || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_'),
+                |a, b| a.combine(b, |_, _| '\0'),
+            )
+            .and_then(|ident| {
+                Parser::new_ok_with(move |scanner| {
+                    ident.map(|_| scanner.source[ident.start..ident.end].to_string())
+                })
             })
-        })
+    })
 }
 
 #[cfg(test)]

@@ -15,17 +15,11 @@ pub struct Unary {
     pub operand: Box<Expression>,
 }
 
-fn unary_parser() -> Parser<Expression> {
+pub fn unary_expression_parser() -> Parser<Expression> {
     fn _operator() -> Parser<Span<Operator>> {
         skip_parser().and_then(|_| {
-            char_match_parser(|ch| matches!(ch, '-' | '!' | '~')).map(|ch| {
-                ch.map(|op| match op {
-                    '-' => Operator::Negate,
-                    '!' => Operator::Not,
-                    '~' => Operator::BitNot,
-                    _ => unreachable!(),
-                })
-            })
+            chars_eq_parser(&['-', '!', '~'])
+                .map(|ch| ch.map(|op| [Operator::Negate, Operator::Not, Operator::BitNot][op]))
         })
     }
     _operator()
@@ -45,7 +39,7 @@ fn unary_parser() -> Parser<Expression> {
                         operand: operand.into(),
                     })
                 })
-                .map_err(|e| e.map(|code| code.map(|_| ErrorCode::ExpectedPrimary)))
+                .map_err(|e| e.map(|_| Error::ExpectedPrimary))
         })
         .or_else(|_| primary_parser())
 }
@@ -71,6 +65,12 @@ mod tests {
             ))
             .into(),
         });
-        assert_eq!(unary_parser().parse(Scanner::new(test)).unwrap().1, answer);
+        assert_eq!(
+            unary_expression_parser()
+                .parse(Scanner::new(test))
+                .unwrap()
+                .1,
+            answer
+        );
     }
 }

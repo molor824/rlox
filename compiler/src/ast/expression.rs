@@ -1,4 +1,8 @@
-use super::{primary::*, unary::*, Parser, Span};
+use super::{
+    binary::{binary_expression_parser, Binary},
+    unary::Unary,
+    Parser, Span,
+};
 
 use num_bigint::BigUint;
 
@@ -16,8 +20,9 @@ pub enum Expression {
     StrLit(Span<String>),
     Number(Span<Number>),
     Unary(Unary),
+    Binary(Binary),
 }
 
 pub fn expression_parser() -> Parser<Expression> {
-    primary_parser()
+    binary_expression_parser()
 }

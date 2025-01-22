@@ -1,18 +1,17 @@
-use super::{expression::*, primitive::*, Parser, Span};
+use super::{expression::*, primitive::*, Parser};
 
 pub fn primary_parser() -> Parser<Expression> {
-    skip_parser().and_then(|_| {
-        number_parser()
-            .map(Expression::Number)
-            .or_else(|_| char_lit_parser().map(Expression::CharLit))
-            .or_else(|_| string_lit_parser().map(Expression::StrLit))
-            .or_else(|_| ident_parser().map(Expression::Ident))
-    })
+    number_parser()
+        .map(Expression::Number)
+        .or_else(|_| char_lit_parser().map(Expression::CharLit))
+        .or_else(|_| string_lit_parser().map(Expression::StrLit))
+        .or_else(|_| ident_parser().map(Expression::Ident))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::ast::scanner::Scanner;
+    use crate::span::Span;
 
     use super::*;
 

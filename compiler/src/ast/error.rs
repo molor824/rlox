@@ -1,45 +1,29 @@
-use std::rc::Rc;
-
 use thiserror::Error;
 
-use crate::span::Span;
-
-#[derive(Clone, Debug)]
-pub struct Error {
-    pub source: Rc<str>,
-    pub code: Span<ErrorCode>,
-}
-impl Error {
-    pub const fn new(source: Rc<str>, code: Span<ErrorCode>) -> Self {
-        Self { source, code }
-    }
-    pub fn map(self, f: impl FnOnce(Span<ErrorCode>) -> Span<ErrorCode>) -> Self {
-        Self {
-            source: self.source,
-            code: f(self.code),
-        }
-    }
-}
 #[derive(Error, Debug, Clone)]
-pub enum ErrorCode {
+pub enum Error {
     #[error("reached end of file.")]
     Eof,
-    #[error("expected token {0:?}")]
-    ExpectedToken(&'static str),
-    #[error("unexpected token {0:?}")]
-    UnexpectedToken(&'static str),
+    #[error("expected {0:?}")]
+    ExpectedString(String),
+    #[error("expected one of {0:?}")]
+    ExpectedStrings(Vec<String>),
+    #[error("unexpected {0:?}")]
+    UnexpectedString(String),
     #[error("expected character {0:?}")]
     ExpectedChar(char),
+    #[error("expected one of {0:?} characters")]
+    ExpectedChars(Vec<char>),
     #[error("expected primary expression")]
     ExpectedPrimary,
     #[error("expected base prefix (one of b, o, x)")]
     ExpectedBase,
     #[error("expected integer")]
     ExpectedInt,
-    #[error("character does not match")]
-    CharNotMatch,
     #[error("character is not a digit")]
     CharNotDigit,
+    #[error("character does not match")]
+    CharNotMatch,
     #[error("exponent overflow")]
     ExponentOverflow,
     #[error("missing exponent")]
