@@ -157,29 +157,19 @@ fn l_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
     mut operator: impl FnMut() -> Parser<Span<Operator>> + 'static,
 ) -> Parser<Expression> {
-    let lower1 = lower();
-    lower()
-        .and_then(|left| {
-            operator().and_then(|op| {
-                l_binary_parser(lower, operator).map(|right| match right {
-                    Expression::Binary(mut binary) if binary.operator.value == op.value => {
-                        binary.left = Expression::Binary(Binary {
-                            left: left.into(),
-                            right: binary.left,
-                            operator: op,
-                        })
-                        .into();
-                        Expression::Binary(binary)
-                    }
-                    right => Expression::Binary(Binary {
-                        left: left.into(),
-                        right: right.into(),
-                        operator: op,
-                    }),
-                })
+    lower().fold(
+        move || {
+            let lower = lower();
+            operator().and_then(move |op| lower.map(|right| (op, right)))
+        },
+        |left, (operator, right)| {
+            Expression::Binary(Binary {
+                left: left.into(),
+                right: right.into(),
+                operator,
             })
-        })
-        .or_else(move |_| lower1)
+        },
+    )
 }
 fn r_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
@@ -209,9 +199,9 @@ mod tests {
 
     #[test]
     fn binary_parser_test() {
-        let test = "a += b = 1 + 2 + 3 * 4 >= 5 && 6 * 7 < 8 || 9 == 10 == 11 == 12";
+        let test = "a = b = c = 1 + 2 + 3 * 4 >= 5 && 6 * 7 < 8 || 9 == 10 == 11 == 12";
         let answer =
-            "(+= a (= b (|| (&& (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== 9:10 (== 10:10 11:10)) 12:10))))";
+            "(= a (= b (= c (|| (&& (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== (== 9:10 10:10) 11:10) 12:10)))))";
         assert_eq!(
             binary_expression_parser()
                 .parse(Scanner::new(test))

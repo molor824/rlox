@@ -2,11 +2,12 @@ use std::fmt;
 
 use super::{
     binary::{binary_expression_parser, Binary},
-    unary::Unary,
+    unary::PrefixUnary,
     Parser, Span,
 };
 
 use num_bigint::BigUint;
+use crate::ast::unary::PostfixUnary;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Number {
@@ -40,7 +41,8 @@ pub enum Expression {
     CharLit(Span<char>),
     StrLit(Span<String>),
     Number(Span<Number>),
-    Unary(Unary),
+    PrefixUnary(PrefixUnary),
+    PostfixUnary(PostfixUnary),
     Binary(Binary),
 }
 impl fmt::Display for Expression {
@@ -50,7 +52,8 @@ impl fmt::Display for Expression {
             Expression::CharLit(char_lit) => write!(f, "{:?}", char_lit.value),
             Expression::StrLit(str_lit) => write!(f, "{:?}", str_lit.value),
             Expression::Number(number) => write!(f, "{}", number.value),
-            Expression::Unary(unary) => write!(f, "{}", unary),
+            Expression::PrefixUnary(unary) => write!(f, "{}", unary),
+            Expression::PostfixUnary(unary) => write!(f, "{}", unary),
             Expression::Binary(binary) => write!(f, "{}", binary),
         }
     }
