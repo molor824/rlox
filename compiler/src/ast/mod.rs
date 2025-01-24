@@ -87,7 +87,7 @@ fn next_char_parser() -> Parser<Span<char>> {
         None => Err(Span::from_len(scanner.offset, 0, Error::Eof)),
     })
 }
-fn string_eq_parser(string: &'static str) -> Parser<Span<()>> {
+fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
     Parser::new(move |Scanner { source, offset }| {
         if source[offset..].starts_with(&string) {
             Ok((
@@ -95,7 +95,7 @@ fn string_eq_parser(string: &'static str) -> Parser<Span<()>> {
                     offset: offset + string.len(),
                     source,
                 },
-                Span::new(offset, offset + string.len(), ()),
+                Span::new(offset, offset + string.len(), string),
             ))
         } else {
             Err(Span::from_len(
@@ -136,15 +136,12 @@ fn char_eq_parser(ch: char) -> Parser<Span<char>> {
         }
     })
 }
-fn chars_eq_parser(chars: &'static [char]) -> Parser<Span<usize>> {
+fn chars_eq_parser(chars: &'static [char]) -> Parser<Span<char>> {
     next_char_parser().and_then(move |char| {
-        match chars
-            .into_iter()
-            .enumerate()
-            .find(|(_, &ch)| ch == char.value)
-        {
-            Some((index, _)) => Parser::new_ok(char.map(|_| index)),
-            None => Parser::new_err(char.map(|_| Error::ExpectedChars(chars.to_vec()))),
+        if chars.contains(&char.value) {
+            Parser::new_ok(char)
+        } else {
+            Parser::new_err(char.map(|_| Error::ExpectedChars(chars.iter().cloned().collect())))
         }
     })
 }

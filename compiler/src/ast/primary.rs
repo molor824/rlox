@@ -1,4 +1,6 @@
-use super::{expression::*, primitive::*, Parser};
+use crate::span::Span;
+
+use super::{expression::Expression, primitive::*, string_eq_parser, strings_eq_parser, Parser};
 
 pub fn primary_parser() -> Parser<Expression> {
     number_parser()
@@ -8,8 +10,16 @@ pub fn primary_parser() -> Parser<Expression> {
         .or_else(|_| ident_parser().map(Expression::Ident))
 }
 
+pub fn symbol_parser(symbol: &'static str) -> Parser<Span<&'static str>> {
+    skip_parser().and_then(move |_| string_eq_parser(symbol))
+}
+pub fn symbols_parser(symbols: &'static [&'static str]) -> Parser<Span<&'static str>> {
+    skip_parser().and_then(move |_| strings_eq_parser(symbols))
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::ast::expression::Number;
     use crate::ast::scanner::Scanner;
     use crate::span::Span;
 
