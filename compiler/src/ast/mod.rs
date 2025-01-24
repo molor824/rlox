@@ -106,19 +106,18 @@ fn string_eq_parser(string: &'static str) -> Parser<Span<()>> {
         }
     })
 }
-fn strings_eq_parser(strings: &'static [&'static str]) -> Parser<Span<usize>> {
+fn strings_eq_parser(strings: &'static [&'static str]) -> Parser<Span<&'static str>> {
     Parser::new(move |Scanner { source, offset }| {
         match strings
             .into_iter()
-            .enumerate()
-            .find(|(_, &s)| source[offset..].starts_with(s))
+            .find(|&s| source[offset..].starts_with(s))
         {
-            Some((index, str)) => Ok((
+            Some(&str) => Ok((
                 Scanner {
                     source,
                     offset: offset + str.len(),
                 },
-                Span::new(offset, offset + str.len(), index),
+                Span::new(offset, offset + str.len(), str),
             )),
             None => Err(Span::from_len(
                 offset,
