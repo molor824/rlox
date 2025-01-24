@@ -1,7 +1,9 @@
+use std::fmt;
+
 use crate::span::Span;
 
 use super::{
-    char_eq_parser, expression::Expression, primitive::skip_parser, strings_eq_parser,
+    expression::Expression, primary::symbols_parser, primitive::skip_parser,
     unary::unary_expression_parser, Parser,
 };
 
@@ -10,6 +12,11 @@ pub struct Binary {
     pub left: Box<Expression>,
     pub right: Box<Expression>,
     pub operator: Span<Operator>,
+}
+impl fmt::Display for Binary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({} {} {})", self.operator.value, self.left, self.right)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +28,6 @@ pub enum Operator {
     Mod,
     And,
     Or,
-    Xor,
     BitAnd,
     BitOr,
     BitXor,
@@ -35,6 +41,70 @@ pub enum Operator {
     NotEq,
     Assign(Option<Box<Operator>>),
 }
+impl fmt::Display for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Operator::Add => "+",
+            Operator::Sub => "-",
+            Operator::Mul => "*",
+            Operator::Div => "/",
+            Operator::Mod => "%",
+            Operator::And => "&&",
+            Operator::Or => "||",
+            Operator::BitAnd => "&",
+            Operator::BitOr => "|",
+            Operator::BitXor => "^",
+            Operator::LShift => "<<",
+            Operator::RShift => ">>",
+            Operator::LessThan => "<",
+            Operator::LessThanEq => "<=",
+            Operator::MoreThan => ">",
+            Operator::MoreThanEq => ">=",
+            Operator::Equals => "==",
+            Operator::NotEq => "!=",
+            Operator::Assign(None) => "=",
+            Operator::Assign(Some(op)) => return write!(f, "{}=", op),
+        })
+    }
+}
+impl Operator {
+    pub fn try_from_str(op: &str) -> Option<Self> {
+        match op {
+            "+" => Some(Operator::Add),
+            "-" => Some(Operator::Sub),
+            "*" => Some(Operator::Mul),
+            "/" => Some(Operator::Div),
+            "%" => Some(Operator::Mod),
+            "&&" => Some(Operator::And),
+            "||" => Some(Operator::Or),
+            "&" => Some(Operator::BitAnd),
+            "|" => Some(Operator::BitOr),
+            "^" => Some(Operator::BitXor),
+            "<<" => Some(Operator::LShift),
+            ">>" => Some(Operator::RShift),
+            "<" => Some(Operator::LessThan),
+            "<=" => Some(Operator::LessThanEq),
+            ">" => Some(Operator::MoreThan),
+            ">=" => Some(Operator::MoreThanEq),
+            "==" => Some(Operator::Equals),
+            "!=" => Some(Operator::NotEq),
+            "=" => Some(Operator::Assign(None)),
+            op if op.ends_with('=') => Operator::try_from_str(&op[0..op.len() - 1])
+                .and_then(|op| match op {
+                    Operator::Equals
+                    | Operator::NotEq
+                    | Operator::LessThan
+                    | Operator::LessThanEq
+                    | Operator::MoreThan
+                    | Operator::MoreThanEq
+                    | Operator::Assign(..) => None,
+                    op => Some(op),
+                })
+                .map(|op| Operator::Assign(Some(Box::new(op)))),
+            _ => None,
+        }
+    }
+}
 
 pub fn binary_expression_parser() -> Parser<Expression> {
     assign_parser()
@@ -42,105 +112,48 @@ pub fn binary_expression_parser() -> Parser<Expression> {
 fn assign_parser() -> Parser<Expression> {
     r_binary_parser(logic_or_parser, || {
         skip_parser().and_then(|_| {
-            operator_parser(
-                &[
-                    "+", "-", "*", "/", "%", "<<", ">>", "&", "^", "|", "&&", "^^", "||",
-                ],
-                &[
-                    Operator::Add,
-                    Operator::Sub,
-                    Operator::Mul,
-                    Operator::Div,
-                    Operator::Mod,
-                    Operator::LShift,
-                    Operator::RShift,
-                    Operator::BitAnd,
-                    Operator::BitXor,
-                    Operator::BitOr,
-                    Operator::And,
-                    Operator::Xor,
-                    Operator::Or,
-                ],
-            )
-            .and_then(|op| {
-                char_eq_parser('=')
-                    .map(|eq| op.combine(eq, |op, _| Operator::Assign(Some(op.into()))))
-            })
-            .or_else(|_| char_eq_parser('=').map(|eq| eq.map(|_| Operator::Assign(None))))
+            operator_parser(&[
+                "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=", "&&=", "||=", "=",
+            ])
         })
     })
 }
 fn logic_or_parser() -> Parser<Expression> {
-    l_binary_parser(logic_xor_parser, || {
-        operator_parser(&["||"], &[Operator::Or])
-    })
-}
-fn logic_xor_parser() -> Parser<Expression> {
-    l_binary_parser(logic_and_parser, || {
-        operator_parser(&["^^"], &[Operator::Xor])
-    })
+    l_binary_parser(logic_and_parser, || operator_parser(&["||"]))
 }
 fn logic_and_parser() -> Parser<Expression> {
-    l_binary_parser(bit_or_parser, || operator_parser(&["&&"], &[Operator::And]))
+    l_binary_parser(bit_or_parser, || operator_parser(&["&&"]))
 }
 fn bit_or_parser() -> Parser<Expression> {
-    l_binary_parser(bit_xor_parser, || {
-        operator_parser(&["|"], &[Operator::BitOr])
-    })
+    l_binary_parser(bit_xor_parser, || operator_parser(&["|"]))
 }
 fn bit_xor_parser() -> Parser<Expression> {
-    l_binary_parser(bit_and_parser, || {
-        operator_parser(&["^"], &[Operator::BitXor])
-    })
+    l_binary_parser(bit_and_parser, || operator_parser(&["^"]))
 }
 fn bit_and_parser() -> Parser<Expression> {
-    l_binary_parser(eq_parser, || operator_parser(&["&"], &[Operator::BitAnd]))
+    l_binary_parser(eq_parser, || operator_parser(&["&"]))
 }
 fn eq_parser() -> Parser<Expression> {
-    l_binary_parser(non_eq_parser, || {
-        operator_parser(&["==", "/="], &[Operator::Equals, Operator::NotEq])
-    })
+    l_binary_parser(non_eq_parser, || operator_parser(&["==", "/="]))
 }
 fn non_eq_parser() -> Parser<Expression> {
-    l_binary_parser(shift_parser, || {
-        operator_parser(
-            &["<=", ">=", "<", ">"],
-            &[
-                Operator::LessThanEq,
-                Operator::MoreThanEq,
-                Operator::LessThan,
-                Operator::MoreThan,
-            ],
-        )
-    })
+    l_binary_parser(shift_parser, || operator_parser(&["<=", ">=", "<", ">"]))
 }
 fn shift_parser() -> Parser<Expression> {
-    l_binary_parser(term_parser, || {
-        operator_parser(&["<<", ">>"], &[Operator::LShift, Operator::RShift])
-    })
+    l_binary_parser(term_parser, || operator_parser(&["<<", ">>"]))
 }
 fn term_parser() -> Parser<Expression> {
-    l_binary_parser(product_parser, || {
-        operator_parser(&["+", "-"], &[Operator::Add, Operator::Sub])
-    })
+    l_binary_parser(product_parser, || operator_parser(&["+", "-"]))
 }
 fn product_parser() -> Parser<Expression> {
     l_binary_parser(unary_expression_parser, || {
-        operator_parser(
-            &["*", "/", "%"],
-            &[Operator::Mul, Operator::Div, Operator::Mod],
-        )
+        operator_parser(&["*", "/", "%"])
     })
 }
-fn operator_parser(
-    operator_strings: &'static [&'static str],
-    operators: &'static [Operator],
-) -> Parser<Span<Operator>> {
-    skip_parser().and_then(move |_| {
-        strings_eq_parser(operator_strings).map(|i| i.map(|i| operators[i].clone()))
-    })
+fn operator_parser(strings: &'static [&'static str]) -> Parser<Span<Operator>> {
+    symbols_parser(strings).map(|i| i.map(|i| Operator::try_from_str(i).unwrap()))
 }
-fn r_binary_parser(
+fn l_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
     mut operator: impl FnMut() -> Parser<Span<Operator>> + 'static,
 ) -> Parser<Expression> {
@@ -148,11 +161,11 @@ fn r_binary_parser(
     lower()
         .and_then(|left| {
             operator().and_then(|op| {
-                r_binary_parser(lower, operator).map(|right| match right {
-                    Expression::Binary(mut binary) => {
+                l_binary_parser(lower, operator).map(|right| match right {
+                    Expression::Binary(mut binary) if binary.operator.value == op.value => {
                         binary.left = Expression::Binary(Binary {
                             left: left.into(),
-                            right: binary.left.into(),
+                            right: binary.left,
                             operator: op,
                         })
                         .into();
@@ -168,7 +181,7 @@ fn r_binary_parser(
         })
         .or_else(move |_| lower1)
 }
-fn l_binary_parser(
+fn r_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
     mut operator: impl FnMut() -> Parser<Span<Operator>> + 'static,
 ) -> Parser<Expression> {
@@ -176,7 +189,7 @@ fn l_binary_parser(
     lower()
         .and_then(|left| {
             operator().and_then(|op| {
-                l_binary_parser(lower, operator).map(|right| {
+                r_binary_parser(lower, operator).map(|right| {
                     Expression::Binary(Binary {
                         left: left.into(),
                         right: right.into(),
@@ -190,8 +203,22 @@ fn l_binary_parser(
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::scanner::Scanner;
+
+    use super::*;
+
     #[test]
     fn binary_parser_test() {
-        todo!()
+        let test = "a += b = 1 + 2 + 3 * 4 >= 5 && 6 * 7 < 8 || 9 == 10 == 11 == 12";
+        let answer =
+            "(+= a (= b (|| (&& (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== 9:10 (== 10:10 11:10)) 12:10))))";
+        assert_eq!(
+            binary_expression_parser()
+                .parse(Scanner::new(test))
+                .unwrap()
+                .1
+                .to_string(),
+            answer
+        )
     }
 }

@@ -87,7 +87,7 @@ fn next_char_parser() -> Parser<Span<char>> {
         None => Err(Span::from_len(scanner.offset, 0, Error::Eof)),
     })
 }
-fn string_eq_parser(string: &'static str) -> Parser<Span<()>> {
+fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
     Parser::new(move |Scanner { source, offset }| {
         if source[offset..].starts_with(&string) {
             Ok((
@@ -95,7 +95,7 @@ fn string_eq_parser(string: &'static str) -> Parser<Span<()>> {
                     offset: offset + string.len(),
                     source,
                 },
-                Span::new(offset, offset + string.len(), ()),
+                Span::new(offset, offset + string.len(), string),
             ))
         } else {
             Err(Span::from_len(
@@ -106,19 +106,18 @@ fn string_eq_parser(string: &'static str) -> Parser<Span<()>> {
         }
     })
 }
-fn strings_eq_parser(strings: &'static [&'static str]) -> Parser<Span<usize>> {
+fn strings_eq_parser(strings: &'static [&'static str]) -> Parser<Span<&'static str>> {
     Parser::new(move |Scanner { source, offset }| {
         match strings
             .into_iter()
-            .enumerate()
-            .find(|(_, &s)| source[offset..].starts_with(s))
+            .find(|&s| source[offset..].starts_with(s))
         {
-            Some((index, str)) => Ok((
+            Some(&str) => Ok((
                 Scanner {
                     source,
                     offset: offset + str.len(),
                 },
-                Span::new(offset, offset + str.len(), index),
+                Span::new(offset, offset + str.len(), str),
             )),
             None => Err(Span::from_len(
                 offset,
@@ -137,15 +136,12 @@ fn char_eq_parser(ch: char) -> Parser<Span<char>> {
         }
     })
 }
-fn chars_eq_parser(chars: &'static [char]) -> Parser<Span<usize>> {
+fn chars_eq_parser(chars: &'static [char]) -> Parser<Span<char>> {
     next_char_parser().and_then(move |char| {
-        match chars
-            .into_iter()
-            .enumerate()
-            .find(|(_, &ch)| ch == char.value)
-        {
-            Some((index, _)) => Parser::new_ok(char.map(|_| index)),
-            None => Parser::new_err(char.map(|_| Error::ExpectedChars(chars.to_vec()))),
+        if chars.contains(&char.value) {
+            Parser::new_ok(char)
+        } else {
+            Parser::new_err(char.map(|_| Error::ExpectedChars(chars.iter().cloned().collect())))
         }
     })
 }
