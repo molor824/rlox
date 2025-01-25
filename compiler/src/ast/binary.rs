@@ -7,7 +7,7 @@ use super::{
     unary::unary_expression_parser, Parser,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Binary {
     pub left: Box<Expression>,
     pub right: Box<Expression>,

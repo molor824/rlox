@@ -31,7 +31,7 @@ impl fmt::Display for PrefixOperator {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct PrefixUnary {
     pub operator: Span<PrefixOperator>,
     pub operand: Box<Expression>,
@@ -42,7 +42,7 @@ impl fmt::Display for PrefixUnary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum PostfixOperator {
     Call(Vec<Expression>),
     Property(String),
@@ -53,18 +53,18 @@ impl fmt::Display for PostfixOperator {
         match self {
             Self::Call(args) => write!(
                 f,
-                "()[{}]",
+                "([{}])",
                 args.iter()
                     .map(|arg| arg.to_string())
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            Self::Property(property) => write!(f, ".[{}]", property),
-            Self::Index(index) => write!(f, "[][{}]", index),
+            Self::Property(property) => write!(f, ".{}", property),
+            Self::Index(index) => write!(f, "[{}]", index),
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct PostfixUnary {
     pub operator: Span<PostfixOperator>,
     pub operand: Box<Expression>,
@@ -159,8 +159,7 @@ mod tests {
     #[test]
     fn test_postfix_unary() {
         let test = "a.c(d[f(1, 2)].e(3)(4)[5])";
-        let answer =
-            "((a .[c]) ()[(((((d [][(f ()[1:10 2:10])]) .[e]) ()[3:10]) ()[4:10]) [][5:10])])";
+        let answer = "((a .c) ([(((((d [(f ([1:10 2:10]))]) .e) ([3:10])) ([4:10])) [5:10])]))";
         assert_eq!(
             unary_expression_parser()
                 .parse(Scanner::new(test))
