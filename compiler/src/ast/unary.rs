@@ -46,6 +46,7 @@ impl fmt::Display for PrefixUnary {
 pub enum PostfixOperator {
     Call(Vec<Expression>),
     Property(String),
+    Index(Box<Expression>),
 }
 impl fmt::Display for PostfixOperator {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -59,6 +60,7 @@ impl fmt::Display for PostfixOperator {
                     .join(" ")
             ),
             Self::Property(property) => write!(f, ".[{}]", property),
+            Self::Index(index) => write!(f, "[][{}]", index),
         }
     }
 }
@@ -91,7 +93,11 @@ fn prefix_unary_parser() -> Parser<Expression> {
 }
 fn postfix_unary_parser() -> Parser<Expression> {
     primary_parser().fold(
-        || postfix_property_parser().or_else(|_| postfix_call_parser()),
+        || {
+            postfix_property_parser()
+                .or_else(|_| postfix_call_parser())
+                .or_else(|_| postfix_index_parser())
+        },
         |operand, operator| {
             Expression::PostfixUnary(PostfixUnary {
                 operand: operand.into(),
@@ -104,6 +110,15 @@ fn postfix_property_parser() -> Parser<Span<PostfixOperator>> {
     symbol_parser(".").and_then(|dot| {
         ident_parser().map(move |ident| dot.combine(ident, |_, i| PostfixOperator::Property(i)))
     })
+}
+fn postfix_index_parser() -> Parser<Span<PostfixOperator>> {
+    symbol_parser("[")
+        .and_then(|lparen| expression_parser().map(move |expr| (lparen, expr)))
+        .and_then(|(lparen, expr)| {
+            symbol_parser("]").map(move |rparen| {
+                lparen.combine(rparen, |_, _| PostfixOperator::Index(expr.into()))
+            })
+        })
 }
 fn postfix_call_parser() -> Parser<Span<PostfixOperator>> {
     symbol_parser("(").and_then(|lparen| {
@@ -143,8 +158,9 @@ mod tests {
     }
     #[test]
     fn test_postfix_unary() {
-        let test = "a.b.c().d(e.f, g.h(1, 2, 3), i())";
-        let answer = "(((((a .[b]) .[c]) ()[]) .[d]) ()[(e .[f]) ((g .[h]) ()[1:10 2:10 3:10]) (i ()[])])";
+        let test = "a.c(d[f(1, 2)].e(3)(4)[5])";
+        let answer =
+            "((a .[c]) ()[(((((d [][(f ()[1:10 2:10])]) .[e]) ()[3:10]) ()[4:10]) [][5:10])])";
         assert_eq!(
             unary_expression_parser()
                 .parse(Scanner::new(test))
