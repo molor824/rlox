@@ -8,7 +8,7 @@ mod error;
 pub mod expression;
 mod primary;
 mod primitive;
-mod scanner;
+pub mod scanner;
 mod unary;
 
 pub type ParseResult<T> = Result<(Scanner, T), Span<Error>>;
