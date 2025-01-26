@@ -68,7 +68,7 @@ mod tests {
         let answers = [
             "321e-2:10",
             "ident",
-            "ff:16",
+            "255:16",
             "\"a string test!\\n\"",
             "'p'",
             "[1:10, 2:10, 3:10]",

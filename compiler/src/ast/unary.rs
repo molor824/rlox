@@ -52,7 +52,7 @@ impl fmt::Display for PostfixOperator {
         match self {
             Self::Call(args) => write!(
                 f,
-                "([{}])",
+                "({})",
                 args.iter()
                     .map(|arg| arg.to_string())
                     .collect::<Vec<_>>()
@@ -107,7 +107,8 @@ fn postfix_unary_parser() -> Parser<Expression> {
 }
 fn postfix_property_parser() -> Parser<Span<PostfixOperator>> {
     symbol_parser(".").and_then(|dot| {
-        ident_parser().map(move |ident| dot.combine(ident.span(), |_, _| PostfixOperator::Property(ident)))
+        ident_parser()
+            .map(move |ident| dot.combine(ident.span(), |_, _| PostfixOperator::Property(ident)))
     })
 }
 fn postfix_index_parser() -> Parser<Span<PostfixOperator>> {
@@ -150,7 +151,7 @@ mod tests {
     #[test]
     fn test_postfix_unary() {
         let test = "a.c(d[f(1, 2)].e(3)(4)[5])";
-        let answer = "((a .c) ([(((((d [(f ([1:10, 2:10]))]) .e) ([3:10])) ([4:10])) [5:10])]))";
+        let answer = "((a .c) ((((((d [(f (1:10, 2:10))]) .e) (3:10)) (4:10)) [5:10])))";
         assert_eq!(
             unary_expression_parser()
                 .parse(Scanner::new(test))

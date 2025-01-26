@@ -21,15 +21,15 @@ impl fmt::Display for Number {
             Some(exp) => write!(
                 f,
                 "{}e{}:{}",
-                self.integer.to_str_radix(self.radix),
+                self.integer,
                 exp,
-                self.radix
+                self.radix,
             ),
             None => write!(
                 f,
                 "{}:{}",
-                self.integer.to_str_radix(self.radix),
-                self.radix
+                self.integer,
+                self.radix,
             ),
         }
     }
