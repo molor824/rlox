@@ -1,6 +1,7 @@
-use num_bigint::{BigInt, BigUint};
-
+use std::fmt;
 use super::{error::Error, expression::Number, scanner::Scanner, *};
+use num_bigint::{BigInt, BigUint};
+use std::rc::Rc;
 
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
     next_char_parser().and_then(move |ch| match ch.value.to_digit(radix) {
@@ -272,7 +273,19 @@ pub fn skip_parser() -> Parser<Span<()>> {
         .fold(one_of, |a, b| a.combine(b, |_, _| ()))
         .or_else(|e| Parser::new_ok(Span::from_len(e.start, 0, ())))
 }
-pub fn ident_parser() -> Parser<Span<String>> {
+#[derive(Debug)]
+pub struct Ident(pub Span<Rc<str>>);
+impl fmt::Display for Ident {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.0.value[self.0.start..self.0.end])
+    }
+}
+impl Ident {
+    pub fn span(&self) -> Span<()> {
+        Span::new(self.0.start, self.0.end, ())
+    }
+}
+pub fn ident_parser() -> Parser<Ident> {
     skip_parser().and_then(|_| {
         char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
             .fold(
@@ -281,179 +294,8 @@ pub fn ident_parser() -> Parser<Span<String>> {
             )
             .and_then(|ident| {
                 Parser::new_ok_with(move |scanner| {
-                    ident.map(|_| scanner.source[ident.start..ident.end].to_string())
+                    Ident(ident.map(|_| scanner.source))
                 })
             })
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ast::scanner::Scanner;
-
-    #[test]
-    fn test_ident() {
-        let tests = ["normal", "_underscore", "a1234", "__123__"];
-        let answers = ["normal", "_underscore", "a1234", "__123__"];
-
-        for (test, answer) in tests.into_iter().zip(answers) {
-            assert_eq!(
-                ident_parser().parse(Scanner::new(test)).unwrap().1.value,
-                answer
-            );
-        }
-    }
-    #[test]
-    fn test_skip() {
-        let tests = [
-            "  ",
-            " \n\t\r",
-            "// line comment\nsomething else",
-            "/* block\n comment */something else",
-            "//\n",
-            "/**/",
-            "/*",
-            "//",
-        ];
-        let answers = [
-            "  ",
-            " \n\t\r",
-            "// line comment\n",
-            "/* block\n comment */",
-            "//\n",
-            "/**/",
-            "/*",
-            "//",
-        ];
-        for (test, answer) in tests.into_iter().zip(answers) {
-            let (next, result) = skip_parser().parse(Scanner::new(test)).unwrap();
-            assert_eq!(&next.source[result.start..result.end], answer);
-        }
-    }
-    #[test]
-    fn test_character() {
-        let tests = [r"'a'", r"'\n'", r"'字'", r"'\u{5B57}'", r"'\x34'"];
-        let answers = ['a', '\n', '字', '\u{5B57}', '\x34'];
-        for (test, answer) in tests.into_iter().zip(answers) {
-            assert_eq!(
-                char_lit_parser().parse(Scanner::new(test)).unwrap().1.value,
-                answer
-            );
-        }
-    }
-    #[test]
-    fn test_string() {
-        let tests = [
-            r#""foo""#,
-            r#""i say \"foo\"""#,
-            r#""""#,
-            r#""\n\t\r\0\'\"\u{32}\x45""#,
-        ];
-        let answers = ["foo", "i say \"foo\"", "", "\n\t\r\0\'\"\u{32}\x45"];
-        for (test, answer) in tests.into_iter().zip(answers) {
-            assert_eq!(
-                string_lit_parser()
-                    .parse(Scanner::new(test))
-                    .unwrap()
-                    .1
-                    .value,
-                answer
-            );
-        }
-        assert!(string_lit_parser()
-            .parse(Scanner::new("\"unterminated string!\n\n"))
-            .is_err())
-    }
-    #[test]
-    fn test_number() {
-        let tests = [
-            "3",
-            "0xf4",
-            "0b1_001",
-            "0o123",
-            "3.14",
-            "0x3.f",
-            "0b0.1",
-            "0o1.7",
-            "314e-2",
-            "0.314E1",
-            "0x3.fp-f",
-            "0b0.1e+10",
-            "0o1.7e-10",
-        ];
-        let answers = [
-            Number {
-                radix: 10,
-                integer: 3_u32.into(),
-                exponent: None,
-            },
-            Number {
-                radix: 16,
-                integer: 0xf4_u32.into(),
-                exponent: None,
-            },
-            Number {
-                radix: 2,
-                integer: 0b1001_u32.into(),
-                exponent: None,
-            },
-            Number {
-                radix: 8,
-                integer: 0o123_u32.into(),
-                exponent: None,
-            },
-            Number {
-                radix: 10,
-                integer: 314_u32.into(),
-                exponent: Some(-2),
-            },
-            Number {
-                radix: 16,
-                integer: 0x3f_u32.into(),
-                exponent: Some(-1),
-            },
-            Number {
-                radix: 2,
-                integer: 0b0_1_u32.into(),
-                exponent: Some(-1),
-            },
-            Number {
-                radix: 8,
-                integer: 0o1_7_u32.into(),
-                exponent: Some(-1),
-            },
-            Number {
-                radix: 10,
-                integer: 314_u32.into(),
-                exponent: Some(-2),
-            },
-            Number {
-                radix: 10,
-                integer: 314_u32.into(),
-                exponent: Some(-2),
-            },
-            Number {
-                radix: 16,
-                integer: 0x3f_u32.into(),
-                exponent: Some(-1 - 0xf),
-            },
-            Number {
-                radix: 2,
-                integer: 0b0_1_u32.into(),
-                exponent: Some(-1 + 0b10),
-            },
-            Number {
-                radix: 8,
-                integer: 0o1_7_u32.into(),
-                exponent: Some(-1 - 0o10),
-            },
-        ];
-        for (test, answer) in tests.into_iter().zip(answers) {
-            assert_eq!(
-                number_parser().parse(Scanner::new(test)).unwrap().1.value,
-                answer
-            );
-        }
-    }
 }

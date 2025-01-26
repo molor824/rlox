@@ -1,13 +1,13 @@
-use std::fmt;
-
 use super::{
     binary::{binary_expression_parser, Binary},
     unary::PrefixUnary,
     Parser, Span,
 };
+use std::fmt;
 
-use num_bigint::BigUint;
 use crate::ast::unary::PostfixUnary;
+use num_bigint::BigUint;
+use crate::ast::primitive::Ident;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Number {
@@ -37,10 +37,12 @@ impl fmt::Display for Number {
 
 #[derive(Debug)]
 pub enum Expression {
-    Ident(Span<String>),
+    Ident(Ident),
     CharLit(Span<char>),
     StrLit(Span<String>),
     Number(Span<Number>),
+    Group(Span<Box<Expression>>),
+    Array(Span<Vec<Expression>>),
     PrefixUnary(PrefixUnary),
     PostfixUnary(PostfixUnary),
     Binary(Binary),
@@ -48,10 +50,21 @@ pub enum Expression {
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expression::Ident(ident) => write!(f, "{}", ident.value),
+            Expression::Ident(ident) => write!(f, "{}", ident),
             Expression::CharLit(char_lit) => write!(f, "{:?}", char_lit.value),
             Expression::StrLit(str_lit) => write!(f, "{:?}", str_lit.value),
             Expression::Number(number) => write!(f, "{}", number.value),
+            Expression::Group(expr) => write!(f, "{}", expr.value),
+            Expression::Array(array) => write!(
+                f,
+                "[{}]",
+                array
+                    .value
+                    .iter()
+                    .map(Expression::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Expression::PrefixUnary(unary) => write!(f, "{}", unary),
             Expression::PostfixUnary(unary) => write!(f, "{}", unary),
             Expression::Binary(binary) => write!(f, "{}", binary),

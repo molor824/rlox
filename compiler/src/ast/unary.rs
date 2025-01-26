@@ -1,10 +1,9 @@
 use super::{expression::Expression, Parser, Span, *};
 use crate::ast::expression::expression_parser;
-use crate::ast::primary::symbol_parser;
-use crate::ast::primitive::ident_parser;
+use crate::ast::primary::{args_parser, symbol_parser};
+use crate::ast::primitive::{ident_parser, Ident};
 use primary::{primary_parser, symbols_parser};
 use std::fmt;
-use std::fmt::Formatter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrefixOperator {
@@ -45,11 +44,11 @@ impl fmt::Display for PrefixUnary {
 #[derive(Debug)]
 pub enum PostfixOperator {
     Call(Vec<Expression>),
-    Property(String),
+    Property(Ident),
     Index(Box<Expression>),
 }
 impl fmt::Display for PostfixOperator {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Call(args) => write!(
                 f,
@@ -57,7 +56,7 @@ impl fmt::Display for PostfixOperator {
                 args.iter()
                     .map(|arg| arg.to_string())
                     .collect::<Vec<_>>()
-                    .join(" ")
+                    .join(", ")
             ),
             Self::Property(property) => write!(f, ".{}", property),
             Self::Index(index) => write!(f, "[{}]", index),
@@ -70,7 +69,7 @@ pub struct PostfixUnary {
     pub operand: Box<Expression>,
 }
 impl fmt::Display for PostfixUnary {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({} {})", self.operand, self.operator.value)
     }
 }
@@ -108,7 +107,7 @@ fn postfix_unary_parser() -> Parser<Expression> {
 }
 fn postfix_property_parser() -> Parser<Span<PostfixOperator>> {
     symbol_parser(".").and_then(|dot| {
-        ident_parser().map(move |ident| dot.combine(ident, |_, i| PostfixOperator::Property(i)))
+        ident_parser().map(move |ident| dot.combine(ident.span(), |_, _| PostfixOperator::Property(ident)))
     })
 }
 fn postfix_index_parser() -> Parser<Span<PostfixOperator>> {
@@ -122,15 +121,7 @@ fn postfix_index_parser() -> Parser<Span<PostfixOperator>> {
 }
 fn postfix_call_parser() -> Parser<Span<PostfixOperator>> {
     symbol_parser("(").and_then(|lparen| {
-        expression_parser()
-            .map(|arg| vec![arg])
-            .fold(
-                || symbol_parser(",").and_then(|_| expression_parser()),
-                |mut args, arg| {
-                    args.push(arg);
-                    args
-                },
-            )
+        args_parser()
             .or_else(|_| Parser::new_ok(vec![]))
             .and_then(move |args| {
                 symbol_parser(")")
@@ -159,7 +150,7 @@ mod tests {
     #[test]
     fn test_postfix_unary() {
         let test = "a.c(d[f(1, 2)].e(3)(4)[5])";
-        let answer = "((a .c) ([(((((d [(f ([1:10 2:10]))]) .e) ([3:10])) ([4:10])) [5:10])]))";
+        let answer = "((a .c) ([(((((d [(f ([1:10, 2:10]))]) .e) ([3:10])) ([4:10])) [5:10])]))";
         assert_eq!(
             unary_expression_parser()
                 .parse(Scanner::new(test))
