@@ -49,8 +49,8 @@ impl fmt::Display for Operator {
             Operator::Mul => "*",
             Operator::Div => "/",
             Operator::Mod => "%",
-            Operator::And => "&&",
-            Operator::Or => "||",
+            Operator::And => "and",
+            Operator::Or => "or",
             Operator::BitAnd => "&",
             Operator::BitOr => "|",
             Operator::BitXor => "^",
@@ -75,8 +75,6 @@ impl Operator {
             "*" => Some(Operator::Mul),
             "/" => Some(Operator::Div),
             "%" => Some(Operator::Mod),
-            "&&" => Some(Operator::And),
-            "||" => Some(Operator::Or),
             "&" => Some(Operator::BitAnd),
             "|" => Some(Operator::BitOr),
             "^" => Some(Operator::BitXor),
@@ -89,6 +87,8 @@ impl Operator {
             "==" => Some(Operator::Equals),
             "!=" => Some(Operator::NotEq),
             "=" => Some(Operator::Assign(None)),
+            "and" => Some(Operator::And),
+            "or" => Some(Operator::Or),
             op if op.ends_with('=') => Operator::try_from_str(&op[0..op.len() - 1])
                 .and_then(|op| match op {
                     Operator::Equals
@@ -119,10 +119,10 @@ fn assign_parser() -> Parser<Expression> {
     })
 }
 fn logic_or_parser() -> Parser<Expression> {
-    l_binary_parser(logic_and_parser, || operator_parser(&["||"]))
+    l_binary_parser(logic_and_parser, || operator_parser(&["or"]))
 }
 fn logic_and_parser() -> Parser<Expression> {
-    l_binary_parser(bit_or_parser, || operator_parser(&["&&"]))
+    l_binary_parser(bit_or_parser, || operator_parser(&["and"]))
 }
 fn bit_or_parser() -> Parser<Expression> {
     l_binary_parser(bit_xor_parser, || operator_parser(&["|"]))
@@ -134,7 +134,7 @@ fn bit_and_parser() -> Parser<Expression> {
     l_binary_parser(eq_parser, || operator_parser(&["&"]))
 }
 fn eq_parser() -> Parser<Expression> {
-    l_binary_parser(non_eq_parser, || operator_parser(&["==", "/="]))
+    l_binary_parser(non_eq_parser, || operator_parser(&["==", "!="]))
 }
 fn non_eq_parser() -> Parser<Expression> {
     l_binary_parser(shift_parser, || operator_parser(&["<=", ">=", "<", ">"]))
@@ -199,9 +199,9 @@ mod tests {
 
     #[test]
     fn binary_parser_test() {
-        let test = "a = b = c = 1 + 2 + 3 * 4 >= 5 && 6 * 7 < 8 || 9 == 10 == 11 == 12";
+        let test = "a = b = c = 1 + 2 + 3 * 4 >= 5 and 6 * 7 < 8 or 9 == 10 == 11 == 12";
         let answer =
-            "(= a (= b (= c (|| (&& (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== (== 9:10 10:10) 11:10) 12:10)))))";
+            "(= a (= b (= c (or (and (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== (== 9:10 10:10) 11:10) 12:10)))))";
         assert_eq!(
             binary_expression_parser()
                 .parse(Scanner::new(test))
