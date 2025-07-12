@@ -16,9 +16,26 @@ pub struct Number {
 }
 impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let radix_prefix = match self.radix {
+            2 => "0b",
+            8 => "0o",
+            16 => "0x",
+            _ => "",
+        };
         match self.exponent {
-            Some(exp) => write!(f, "{}e{}:{}", self.integer, exp, self.radix,),
-            None => write!(f, "{}:{}", self.integer, self.radix,),
+            Some(exp) => write!(
+                f,
+                "{}{}e{}",
+                radix_prefix,
+                self.integer.to_str_radix(self.radix),
+                exp,
+            ),
+            None => write!(
+                f,
+                "{}{}",
+                radix_prefix,
+                self.integer.to_str_radix(self.radix)
+            ),
         }
     }
 }

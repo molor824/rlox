@@ -25,7 +25,7 @@ impl Spanning for Assign {
 }
 impl fmt::Display for Assign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(= {} {})", self.assignee, self.expr)
+        write!(f, "{}=({})", self.assignee, self.expr)
     }
 }
 
@@ -38,7 +38,7 @@ impl fmt::Display for Assignee {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ident(i) => write!(f, "{}", i),
-            Self::Property(expression, i) => write!(f, "{}.{}", expression, i),
+            Self::Property(expression, i) => write!(f, "({}).{}", expression, i),
         }
     }
 }
@@ -86,14 +86,7 @@ mod tests {
     #[test]
     fn assign_test() {
         let test = "a = b.c = d[0](1, 2).e.f = 10 + 321";
-        let answer = "(= a (= b.c (= (((d [0:10]) (1:10, 2:10)) .e).f (+ 10:10 321:10))))";
-        println!(
-            "{:?}",
-            assign_expression_parser()
-                .parse(Scanner::new(test))
-                .unwrap()
-                .1
-        );
+        let answer = "a=((b).c=(((((d)[0])(1, 2)).e).f=((10)+(321))))";
         assert_eq!(
             assign_expression_parser()
                 .parse(Scanner::new(test))
