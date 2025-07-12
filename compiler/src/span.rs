@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span<T> {
     pub start: usize,
@@ -20,5 +22,26 @@ impl<T> Span<T> {
     }
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Span<U> {
         Span::new(self.start, self.end, f(self.value))
+    }
+}
+
+pub trait Spanning {
+    fn range(&self) -> Range<usize>;
+    fn start(&self) -> usize {
+        self.range().start
+    }
+    fn end(&self) -> usize {
+        self.range().end
+    }
+    fn span(self) -> Span<Self>
+    where
+        Self: Sized,
+    {
+        Span::new(self.start(), self.end(), self)
+    }
+}
+impl<T> Spanning for Span<T> {
+    fn range(&self) -> Range<usize> {
+        self.start..self.end
     }
 }

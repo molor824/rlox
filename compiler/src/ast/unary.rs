@@ -2,6 +2,7 @@ use super::{expression::Expression, Parser, Span, *};
 use crate::ast::expression::expression_parser;
 use crate::ast::primary::{args_parser, symbol_parser};
 use crate::ast::primitive::{ident_parser, Ident};
+use crate::span::Spanning;
 use primary::{primary_parser, symbols_parser};
 use std::fmt;
 
@@ -34,6 +35,11 @@ impl fmt::Display for PrefixOperator {
 pub struct PrefixUnary {
     pub operator: Span<PrefixOperator>,
     pub operand: Box<Expression>,
+}
+impl Spanning for PrefixUnary {
+    fn range(&self) -> std::ops::Range<usize> {
+        self.operator.start()..self.operand.end()
+    }
 }
 impl fmt::Display for PrefixUnary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -68,6 +74,12 @@ pub struct PostfixUnary {
     pub operator: Span<PostfixOperator>,
     pub operand: Box<Expression>,
 }
+impl Spanning for PostfixUnary {
+    fn range(&self) -> std::ops::Range<usize> {
+        self.operand.start()..self.operator.end()
+    }
+}
+
 impl fmt::Display for PostfixUnary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({} {})", self.operand, self.operator.value)
@@ -90,7 +102,7 @@ fn prefix_unary_parser() -> Parser<Expression> {
         })
         .or_else(|_| postfix_unary_parser())
 }
-fn postfix_unary_parser() -> Parser<Expression> {
+pub fn postfix_unary_parser() -> Parser<Expression> {
     primary_parser().fold(
         || {
             postfix_property_parser()

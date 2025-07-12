@@ -42,4 +42,6 @@ pub enum Error {
     UnicodeOverflow,
     #[error("invalid unicode")]
     InvalidUnicode,
+    #[error("cannot assign to expression with no identifier")]
+    CannotAssign,
 }

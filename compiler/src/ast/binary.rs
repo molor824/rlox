@@ -1,10 +1,9 @@
 use std::fmt;
 
-use crate::span::Span;
+use crate::span::{Span, Spanning};
 
 use super::{
-    expression::Expression, primary::symbols_parser, primitive::skip_parser,
-    unary::unary_expression_parser, Parser,
+    expression::Expression, primary::symbols_parser, unary::unary_expression_parser, Parser,
 };
 
 #[derive(Debug)]
@@ -12,6 +11,11 @@ pub struct Binary {
     pub left: Box<Expression>,
     pub right: Box<Expression>,
     pub operator: Span<Operator>,
+}
+impl Spanning for Binary {
+    fn range(&self) -> std::ops::Range<usize> {
+        self.left.start()..self.right.end()
+    }
 }
 impl fmt::Display for Binary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,16 +111,7 @@ impl Operator {
 }
 
 pub fn binary_expression_parser() -> Parser<Expression> {
-    assign_parser()
-}
-fn assign_parser() -> Parser<Expression> {
-    r_binary_parser(logic_or_parser, || {
-        skip_parser().and_then(|_| {
-            operator_parser(&[
-                "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=", "&&=", "||=", "=",
-            ])
-        })
-    })
+    logic_or_parser()
 }
 fn logic_or_parser() -> Parser<Expression> {
     l_binary_parser(logic_and_parser, || operator_parser(&["or"]))
@@ -171,25 +166,6 @@ fn l_binary_parser(
         },
     )
 }
-fn r_binary_parser(
-    mut lower: impl FnMut() -> Parser<Expression> + 'static,
-    mut operator: impl FnMut() -> Parser<Span<Operator>> + 'static,
-) -> Parser<Expression> {
-    let lower1 = lower();
-    lower()
-        .and_then(|left| {
-            operator().and_then(|op| {
-                r_binary_parser(lower, operator).map(|right| {
-                    Expression::Binary(Binary {
-                        left: left.into(),
-                        right: right.into(),
-                        operator: op,
-                    })
-                })
-            })
-        })
-        .or_else(move |_| lower1)
-}
 
 #[cfg(test)]
 mod tests {
@@ -199,9 +175,9 @@ mod tests {
 
     #[test]
     fn binary_parser_test() {
-        let test = "a = b = c = 1 + 2 + 3 * 4 >= 5 and 6 * 7 < 8 or 9 == 10 == 11 == 12";
+        let test = "1 + 2 + 3 * 4 >= 5 and 6 * 7 < 8 or 9 == 10 == 11 == 12";
         let answer =
-            "(= a (= b (= c (or (and (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== (== 9:10 10:10) 11:10) 12:10)))))";
+            "(or (and (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== (== 9:10 10:10) 11:10) 12:10))";
         assert_eq!(
             binary_expression_parser()
                 .parse(Scanner::new(test))

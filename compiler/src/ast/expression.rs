@@ -1,13 +1,12 @@
-use super::{
-    binary::{binary_expression_parser, Binary},
-    unary::PrefixUnary,
-    Parser, Span,
-};
+use super::{binary::Binary, unary::PrefixUnary, Parser, Span};
 use std::fmt;
 
-use crate::ast::unary::PostfixUnary;
+use crate::ast::{
+    assign::{assign_expression_parser, Assign},
+    unary::PostfixUnary,
+};
+use crate::{ast::primitive::Ident, span::Spanning};
 use num_bigint::BigUint;
-use crate::ast::primitive::Ident;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Number {
@@ -18,19 +17,8 @@ pub struct Number {
 impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.exponent {
-            Some(exp) => write!(
-                f,
-                "{}e{}:{}",
-                self.integer,
-                exp,
-                self.radix,
-            ),
-            None => write!(
-                f,
-                "{}:{}",
-                self.integer,
-                self.radix,
-            ),
+            Some(exp) => write!(f, "{}e{}:{}", self.integer, exp, self.radix,),
+            None => write!(f, "{}:{}", self.integer, self.radix,),
         }
     }
 }
@@ -46,6 +34,23 @@ pub enum Expression {
     PrefixUnary(PrefixUnary),
     PostfixUnary(PostfixUnary),
     Binary(Binary),
+    Assign(Assign),
+}
+impl Spanning for Expression {
+    fn range(&self) -> std::ops::Range<usize> {
+        match self {
+            Self::Ident(ident) => ident.0.range(),
+            Self::CharLit(ch) => ch.range(),
+            Self::StrLit(str) => str.range(),
+            Self::Number(num) => num.range(),
+            Self::Group(group) => group.range(),
+            Self::Array(array) => array.range(),
+            Self::PrefixUnary(prefix) => prefix.range(),
+            Self::PostfixUnary(postfix) => postfix.range(),
+            Self::Binary(binary) => binary.range(),
+            Self::Assign(assign) => assign.range(),
+        }
+    }
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -68,10 +73,11 @@ impl fmt::Display for Expression {
             Expression::PrefixUnary(unary) => write!(f, "{}", unary),
             Expression::PostfixUnary(unary) => write!(f, "{}", unary),
             Expression::Binary(binary) => write!(f, "{}", binary),
+            Expression::Assign(assign) => write!(f, "{}", assign),
         }
     }
 }
 
 pub fn expression_parser() -> Parser<Expression> {
-    binary_expression_parser()
+    assign_expression_parser()
 }
