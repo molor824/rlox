@@ -9,6 +9,7 @@ pub mod expression;
 mod primary;
 mod primitive;
 pub mod scanner;
+mod statement;
 mod unary;
 
 pub type ParseResult<T> = Result<(Scanner, T), Span<Error>>;
