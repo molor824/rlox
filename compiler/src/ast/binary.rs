@@ -19,7 +19,7 @@ impl Spanning for Binary {
 }
 impl fmt::Display for Binary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}){}({})", self.left, self.operator.value, self.right)
+        write!(f, "({} {} {})", self.operator.value, self.left, self.right)
     }
 }
 
@@ -43,6 +43,7 @@ pub enum Operator {
     MoreThanEq,
     Equals,
     NotEq,
+    Assign(Option<Box<Operator>>),
 }
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -65,6 +66,8 @@ impl fmt::Display for Operator {
             Operator::MoreThanEq => ">=",
             Operator::Equals => "==",
             Operator::NotEq => "!=",
+            Operator::Assign(None) => "=",
+            Operator::Assign(Some(op)) => return write!(f, "{}=", op),
         })
     }
 }
@@ -87,8 +90,21 @@ impl Operator {
             ">=" => Some(Operator::MoreThanEq),
             "==" => Some(Operator::Equals),
             "!=" => Some(Operator::NotEq),
+            "=" => Some(Operator::Assign(None)),
             "and" => Some(Operator::And),
             "or" => Some(Operator::Or),
+            op if op.ends_with('=') => Operator::try_from_str(&op[0..op.len() - 1])
+                .and_then(|op| match op {
+                    Operator::Equals
+                    | Operator::NotEq
+                    | Operator::LessThan
+                    | Operator::LessThanEq
+                    | Operator::MoreThan
+                    | Operator::MoreThanEq
+                    | Operator::Assign(..) => None,
+                    op => Some(op),
+                })
+                .map(|op| Operator::Assign(Some(Box::new(op)))),
             _ => None,
         }
     }
@@ -161,7 +177,7 @@ mod tests {
     fn binary_parser_test() {
         let test = "1 + 2 + 3 * 4 >= 5 and 6 * 7 < 8 or 9 == 10 == 11 == 12";
         let answer =
-            "(((((1)+(2))+((3)*(4)))>=(5))and(((6)*(7))<(8)))or((((9)==(10))==(11))==(12))";
+            "(or (and (>= (+ (+ 1:10 2:10) (* 3:10 4:10)) 5:10) (< (* 6:10 7:10) 8:10)) (== (== (== 9:10 10:10) 11:10) 12:10))";
         assert_eq!(
             binary_expression_parser()
                 .parse(Scanner::new(test))

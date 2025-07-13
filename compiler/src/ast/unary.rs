@@ -43,7 +43,7 @@ impl Spanning for PrefixUnary {
 }
 impl fmt::Display for PrefixUnary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}({})", self.operator.value, self.operand)
+        write!(f, "({} {})", self.operator.value, self.operand)
     }
 }
 
@@ -82,7 +82,7 @@ impl Spanning for PostfixUnary {
 
 impl fmt::Display for PostfixUnary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}){}", self.operand, self.operator.value)
+        write!(f, "({} {})", self.operand, self.operator.value)
     }
 }
 
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn test_prefix_unary() {
         let test = " - !~~ ident";
-        let answer = "-(!(~(~(ident))))";
+        let answer = "(- (! (~ (~ ident))))";
         assert_eq!(
             unary_expression_parser()
                 .parse(Scanner::new(test))
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_postfix_unary() {
         let test = "a.c(d[f(1, 2)].e(3)(4)[5])";
-        let answer = "((a).c)((((((d)[(f)(1, 2)]).e)(3))(4))[5])";
+        let answer = "((a .c) ((((((d [(f (1:10, 2:10))]) .e) (3:10)) (4:10)) [5:10])))";
         assert_eq!(
             unary_expression_parser()
                 .parse(Scanner::new(test))
