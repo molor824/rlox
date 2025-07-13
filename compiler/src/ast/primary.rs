@@ -66,13 +66,13 @@ mod tests {
             "(1 + (2 + 3 * (4 + 5)))",
         ];
         let answers = [
-            "321e-2:10",
+            "321e-2",
             "ident",
-            "255:16",
+            "0xff",
             "\"a string test!\\n\"",
             "'p'",
-            "[1:10, 2:10, 3:10]",
-            "(+ 1:10 (+ 2:10 (* 3:10 (+ 4:10 5:10))))"
+            "[1,2,3]",
+            "(1)+((2)+((3)*((4)+(5))))",
         ];
         for (test, answer) in tests.into_iter().zip(answers) {
             let (_, result) = primary_parser().parse(Scanner::new(test)).unwrap();

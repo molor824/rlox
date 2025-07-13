@@ -5,9 +5,9 @@ use super::{
 };
 use std::fmt;
 
+use crate::ast::primitive::Ident;
 use crate::ast::unary::PostfixUnary;
 use num_bigint::BigUint;
-use crate::ast::primitive::Ident;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Number {
@@ -17,19 +17,25 @@ pub struct Number {
 }
 impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let radix_prefix = match self.radix {
+            2 => "0b",
+            8 => "0o",
+            16 => "0x",
+            _ => "",
+        };
         match self.exponent {
             Some(exp) => write!(
                 f,
-                "{}e{}:{}",
-                self.integer,
-                exp,
-                self.radix,
+                "{}{}e{}",
+                radix_prefix,
+                self.integer.to_str_radix(self.radix),
+                exp
             ),
             None => write!(
                 f,
-                "{}:{}",
-                self.integer,
-                self.radix,
+                "{}{}",
+                radix_prefix,
+                self.integer.to_str_radix(self.radix)
             ),
         }
     }
@@ -63,7 +69,7 @@ impl fmt::Display for Expression {
                     .iter()
                     .map(Expression::to_string)
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(",")
             ),
             Expression::PrefixUnary(unary) => write!(f, "{}", unary),
             Expression::PostfixUnary(unary) => write!(f, "{}", unary),
