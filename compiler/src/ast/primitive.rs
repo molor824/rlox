@@ -1,9 +1,6 @@
-use crate::span::Spanning;
-
+use std::fmt;
 use super::{error::Error, expression::Number, scanner::Scanner, *};
 use num_bigint::{BigInt, BigUint};
-use std::fmt;
-use std::hash::Hash;
 use std::rc::Rc;
 
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
@@ -21,7 +18,13 @@ fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
                 digit_parser(radix)
                     .or_else(move |_| char_eq_parser('_').and_then(move |_| digit_parser(radix)))
             },
-            move |acc, digit| acc.combine(digit, |acc, d| acc * radix + d),
+            move |acc, digit| {
+                acc.combine(digit, |mut acc, d| {
+                    acc *= radix;
+                    acc += d;
+                    acc
+                })
+            },
         )
 }
 fn decimal_parser(radix: u32) -> Parser<Span<Number>> {
@@ -277,21 +280,7 @@ impl fmt::Display for Ident {
         write!(f, "{}", &self.0.value[self.0.start..self.0.end])
     }
 }
-impl PartialEq for Ident {
-    fn eq(&self, other: &Self) -> bool {
-        self.slice() == other.slice()
-    }
-}
-impl Eq for Ident {}
-impl Hash for Ident {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.slice().hash(state);
-    }
-}
 impl Ident {
-    pub fn slice(&self) -> &str {
-        &self.0.value[self.0.range()]
-    }
     pub fn span(&self) -> Span<()> {
         Span::new(self.0.start, self.0.end, ())
     }
@@ -304,7 +293,9 @@ pub fn ident_parser() -> Parser<Ident> {
                 |a, b| a.combine(b, |_, _| '\0'),
             )
             .and_then(|ident| {
-                Parser::new_ok_with(move |scanner| Ident(ident.map(|_| scanner.source)))
+                Parser::new_ok_with(move |scanner| {
+                    Ident(ident.map(|_| scanner.source))
+                })
             })
     })
 }
