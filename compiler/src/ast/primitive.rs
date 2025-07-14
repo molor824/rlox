@@ -1,6 +1,6 @@
-use std::fmt;
 use super::{error::Error, expression::Number, scanner::Scanner, *};
 use num_bigint::{BigInt, BigUint};
+use std::fmt;
 use std::rc::Rc;
 
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
@@ -129,8 +129,8 @@ fn radix_parser() -> Parser<Span<u32>> {
             .map_err(|err| err.map(|_| Error::ExpectedBase))
     })
 }
-pub fn number_parser() -> Parser<Span<Number>> {
-    skip_parser().and_then(|_| {
+pub fn number_parser(skip_newline: bool) -> Parser<Span<Number>> {
+    skip_parser(skip_newline).and_then(|_| {
         radix_parser()
             .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
             .or_else(|_| exponent_parser(10))
@@ -174,8 +174,8 @@ fn escape_char_parser() -> Parser<Span<char>> {
         })
         .map_err(|err| err.map(|_| Error::MissingEscape))
 }
-pub fn string_lit_parser() -> Parser<Span<String>> {
-    skip_parser().and_then(|_| {
+pub fn string_lit_parser(skip_newline: bool) -> Parser<Span<String>> {
+    skip_parser(skip_newline).and_then(|_| {
         char_eq_parser('"')
             .map(|q| q.map(|_| String::new()))
             .fold(
@@ -200,8 +200,8 @@ pub fn string_lit_parser() -> Parser<Span<String>> {
             })
     })
 }
-pub fn char_lit_parser() -> Parser<Span<char>> {
-    skip_parser().and_then(|_| {
+pub fn char_lit_parser(skip_newline: bool) -> Parser<Span<char>> {
+    skip_parser(skip_newline).and_then(|_| {
         char_eq_parser('\'')
             .and_then(move |q| {
                 escape_char_parser()
@@ -233,8 +233,15 @@ fn string_not_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
         }
     })
 }
-fn whitespace_parser() -> Parser<Span<()>> {
-    char_match_parser(|ch| ch.is_whitespace()).map(|ch| ch.map(|_| ()))
+fn whitespace_parser(skip_newline: bool) -> Parser<Span<()>> {
+    char_match_parser(move |ch| {
+        if skip_newline {
+            ch.is_whitespace()
+        } else {
+            ch.is_whitespace() && ch != '\n'
+        }
+    })
+    .map(|ch| ch.map(|_| ()))
 }
 fn line_comment_parser() -> Parser<Span<()>> {
     string_eq_parser("//").and_then(|comment| {
@@ -263,12 +270,14 @@ fn block_comment_parser() -> Parser<Span<()>> {
             })
     })
 }
-pub fn skip_parser() -> Parser<Span<()>> {
-    fn one_of() -> Parser<Span<()>> {
-        whitespace_parser()
+// The language uses newline as a seperator instead of ; or anything else
+// However, if an expression is inside parenthesis, then until the parenthesis ends, newline won't be treated as a seperator
+pub fn skip_parser(skip_newline: bool) -> Parser<Span<()>> {
+    let one_of = move || {
+        whitespace_parser(skip_newline)
             .or_else(|_| line_comment_parser())
             .or_else(|_| block_comment_parser())
-    }
+    };
     one_of()
         .fold(one_of, |a, b| a.combine(b, |_, _| ()))
         .or_else(|e| Parser::new_ok(Span::from_len(e.start, 0, ())))
@@ -285,17 +294,15 @@ impl Ident {
         Span::new(self.0.start, self.0.end, ())
     }
 }
-pub fn ident_parser() -> Parser<Ident> {
-    skip_parser().and_then(|_| {
+pub fn ident_parser(skip_newline: bool) -> Parser<Ident> {
+    skip_parser(skip_newline).and_then(|_| {
         char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
             .fold(
                 || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_'),
                 |a, b| a.combine(b, |_, _| '\0'),
             )
             .and_then(|ident| {
-                Parser::new_ok_with(move |scanner| {
-                    Ident(ident.map(|_| scanner.source))
-                })
+                Parser::new_ok_with(move |scanner| Ident(ident.map(|_| scanner.source)))
             })
     })
 }

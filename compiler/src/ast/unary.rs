@@ -1,5 +1,5 @@
 use super::{expression::Expression, Parser, Span, *};
-use crate::ast::expression::expression_parser;
+use crate::ast::expression::inline_expression_parser;
 use crate::ast::primary::{args_parser, symbol_parser};
 use crate::ast::primitive::{ident_parser, Ident};
 use primary::{primary_parser, symbols_parser};
@@ -74,28 +74,28 @@ impl fmt::Display for PostfixUnary {
     }
 }
 
-pub fn unary_expression_parser() -> Parser<Expression> {
-    prefix_unary_parser()
+pub fn unary_expression_parser(skip_newline: bool) -> Parser<Expression> {
+    prefix_unary_parser(skip_newline)
 }
-fn prefix_unary_parser() -> Parser<Expression> {
-    symbols_parser(&["-", "!", "~"])
+fn prefix_unary_parser(skip_newline: bool) -> Parser<Expression> {
+    symbols_parser(skip_newline, &["-", "!", "~"])
         .map(|str| str.map(|op| PrefixOperator::try_from_str(op).unwrap()))
-        .and_then(|operator| {
-            prefix_unary_parser().map(move |expr| {
+        .and_then(move |operator| {
+            prefix_unary_parser(skip_newline).map(move |expr| {
                 Expression::PrefixUnary(PrefixUnary {
                     operator,
                     operand: expr.into(),
                 })
             })
         })
-        .or_else(|_| postfix_unary_parser())
+        .or_else(move |_| postfix_unary_parser(skip_newline))
 }
-fn postfix_unary_parser() -> Parser<Expression> {
-    primary_parser().fold(
-        || {
-            postfix_property_parser()
-                .or_else(|_| postfix_call_parser())
-                .or_else(|_| postfix_index_parser())
+fn postfix_unary_parser(skip_newline: bool) -> Parser<Expression> {
+    primary_parser(skip_newline).fold(
+        move || {
+            postfix_property_parser(skip_newline)
+                .or_else(move |_| postfix_call_parser(skip_newline))
+                .or_else(move |_| postfix_index_parser(skip_newline))
         },
         |operand, operator| {
             Expression::PostfixUnary(PostfixUnary {
@@ -105,27 +105,27 @@ fn postfix_unary_parser() -> Parser<Expression> {
         },
     )
 }
-fn postfix_property_parser() -> Parser<Span<PostfixOperator>> {
-    symbol_parser(".").and_then(|dot| {
-        ident_parser()
+fn postfix_property_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
+    symbol_parser(skip_newline, ".").and_then(move |dot| {
+        ident_parser(skip_newline)
             .map(move |ident| dot.combine(ident.span(), |_, _| PostfixOperator::Property(ident)))
     })
 }
-fn postfix_index_parser() -> Parser<Span<PostfixOperator>> {
-    symbol_parser("[")
-        .and_then(|lparen| expression_parser().map(move |expr| (lparen, expr)))
-        .and_then(|(lparen, expr)| {
-            symbol_parser("]").map(move |rparen| {
+fn postfix_index_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
+    symbol_parser(skip_newline, "[")
+        .and_then(|lparen| inline_expression_parser().map(move |expr| (lparen, expr)))
+        .and_then(move |(lparen, expr)| {
+            symbol_parser(skip_newline, "]").map(move |rparen| {
                 lparen.combine(rparen, |_, _| PostfixOperator::Index(expr.into()))
             })
         })
 }
-fn postfix_call_parser() -> Parser<Span<PostfixOperator>> {
-    symbol_parser("(").and_then(|lparen| {
-        args_parser()
+fn postfix_call_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
+    symbol_parser(skip_newline, "(").and_then(move |lparen| {
+        args_parser(skip_newline)
             .or_else(|_| Parser::new_ok(vec![]))
             .and_then(move |args| {
-                symbol_parser(")")
+                symbol_parser(skip_newline, ")")
                     .map(move |rparen| lparen.combine(rparen, |_, _| PostfixOperator::Call(args)))
             })
     })
@@ -140,7 +140,7 @@ mod tests {
         let test = " - !~~ ident";
         let answer = "-(!(~(~(ident))))";
         assert_eq!(
-            unary_expression_parser()
+            unary_expression_parser(true)
                 .parse(Scanner::new(test))
                 .unwrap()
                 .1
@@ -153,7 +153,7 @@ mod tests {
         let test = "a.c(d[f(1, 2)].e(3)(4)[5])";
         let answer = "((a).c)((((((d)[(f)(1,2)]).e)(3))(4))[5])";
         assert_eq!(
-            unary_expression_parser()
+            unary_expression_parser(true)
                 .parse(Scanner::new(test))
                 .unwrap()
                 .1

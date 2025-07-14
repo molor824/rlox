@@ -4,7 +4,6 @@ pub enum Statement {
     Expression(Expression),
     If(IfStmt),
     While(WhileStmt),
-    Block(Vec<Statement>),
 }
 pub struct WhileStmt {
     pub condition: Expression,

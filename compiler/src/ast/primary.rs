@@ -1,39 +1,39 @@
-use crate::ast::expression::expression_parser;
+use crate::ast::expression::{expression_parser, multiline_expression_parser};
 use crate::span::Span;
 
 use super::{expression::Expression, primitive::*, string_eq_parser, strings_eq_parser, Parser};
 
-pub fn primary_parser() -> Parser<Expression> {
-    number_parser()
+pub fn primary_parser(skip_newline: bool) -> Parser<Expression> {
+    number_parser(skip_newline)
         .map(Expression::Number)
-        .or_else(|_| char_lit_parser().map(Expression::CharLit))
-        .or_else(|_| string_lit_parser().map(Expression::StrLit))
-        .or_else(|_| ident_parser().map(Expression::Ident))
-        .or_else(|_| group_parser())
-        .or_else(|_| array_parser())
+        .or_else(move |_| char_lit_parser(skip_newline).map(Expression::CharLit))
+        .or_else(move |_| string_lit_parser(skip_newline).map(Expression::StrLit))
+        .or_else(move |_| ident_parser(skip_newline).map(Expression::Ident))
+        .or_else(move |_| group_parser(skip_newline))
+        .or_else(move |_| array_parser(skip_newline))
 }
 
-fn group_parser() -> Parser<Expression> {
-    symbol_parser("(").and_then(|lparen| {
-        expression_parser().and_then(move |expr| {
-            symbol_parser(")")
+fn group_parser(skip_newline: bool) -> Parser<Expression> {
+    symbol_parser(skip_newline, "(").and_then(move |lparen| {
+        multiline_expression_parser().and_then(move |expr| {
+            symbol_parser(true, ")")
                 .map(move |rparen| Expression::Group(lparen.combine(rparen, |_, _| Box::new(expr))))
         })
     })
 }
 
-fn array_parser() -> Parser<Expression> {
-    symbol_parser("[").and_then(|lparen| {
-        args_parser().and_then(move |elements| {
-            symbol_parser("]")
+fn array_parser(skip_newline: bool) -> Parser<Expression> {
+    symbol_parser(skip_newline, "[").and_then(move |lparen| {
+        args_parser(true).and_then(move |elements| {
+            symbol_parser(true, "]")
                 .map(move |rparen| Expression::Array(lparen.combine(rparen, |_, _| elements)))
         })
     })
 }
 
-pub fn args_parser() -> Parser<Vec<Expression>> {
-    expression_parser().map(|expr| vec![expr]).fold(
-        || symbol_parser(",").and_then(|_| expression_parser()),
+pub fn args_parser(skip_newline: bool) -> Parser<Vec<Expression>> {
+    expression_parser(skip_newline).map(|expr| vec![expr]).fold(
+        move || symbol_parser(skip_newline, ",").and_then(move |_| expression_parser(skip_newline)),
         |mut args, arg| {
             args.push(arg);
             args
@@ -41,11 +41,14 @@ pub fn args_parser() -> Parser<Vec<Expression>> {
     )
 }
 
-pub fn symbol_parser(symbol: &'static str) -> Parser<Span<&'static str>> {
-    skip_parser().and_then(move |_| string_eq_parser(symbol))
+pub fn symbol_parser(skip_newline: bool, symbol: &'static str) -> Parser<Span<&'static str>> {
+    skip_parser(skip_newline).and_then(move |_| string_eq_parser(symbol))
 }
-pub fn symbols_parser(symbols: &'static [&'static str]) -> Parser<Span<&'static str>> {
-    skip_parser().and_then(move |_| strings_eq_parser(symbols))
+pub fn symbols_parser(
+    skip_newline: bool,
+    symbols: &'static [&'static str],
+) -> Parser<Span<&'static str>> {
+    skip_parser(skip_newline).and_then(move |_| strings_eq_parser(symbols))
 }
 
 #[cfg(test)]
@@ -62,8 +65,8 @@ mod tests {
             " 0xff",
             " \"a string test!\\n\"",
             "'p'",
-            "[1, 2, 3]",
-            "(1 + (2 + 3 * (4 + 5)))",
+            "[1,\n 2\n, 3]",
+            "(\n1 + \n(2 + 3 * (4 + 5)))", // regardless of skip newline mode on or off, as long as expression inside parenthesis, it should always skip newlines
         ];
         let answers = [
             "321e-2",
@@ -75,7 +78,7 @@ mod tests {
             "(1)+((2)+((3)*((4)+(5))))",
         ];
         for (test, answer) in tests.into_iter().zip(answers) {
-            let (_, result) = primary_parser().parse(Scanner::new(test)).unwrap();
+            let (_, result) = primary_parser(false).parse(Scanner::new(test)).unwrap();
             assert_eq!(result.to_string(), answer);
         }
     }

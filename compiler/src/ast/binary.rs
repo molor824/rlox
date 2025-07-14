@@ -3,8 +3,7 @@ use std::fmt;
 use crate::span::Span;
 
 use super::{
-    expression::Expression, primary::symbols_parser, primitive::skip_parser,
-    unary::unary_expression_parser, Parser,
+    expression::Expression, primary::symbols_parser, unary::unary_expression_parser, Parser,
 };
 
 #[derive(Debug)]
@@ -106,52 +105,84 @@ impl Operator {
     }
 }
 
-pub fn binary_expression_parser() -> Parser<Expression> {
-    assign_parser()
+pub fn binary_expression_parser(skip_newline: bool) -> Parser<Expression> {
+    assign_parser(skip_newline)
 }
-fn assign_parser() -> Parser<Expression> {
-    r_binary_parser(logic_or_parser, || {
-        skip_parser().and_then(|_| {
-            operator_parser(&[
-                "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=", "&&=", "||=", "=",
-            ])
-        })
-    })
+fn assign_parser(skip_newline: bool) -> Parser<Expression> {
+    r_binary_parser(
+        move || logic_or_parser(skip_newline),
+        move || {
+            operator_parser(
+                skip_newline,
+                &[
+                    "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=", "&&=", "||=", "=",
+                ],
+            )
+        },
+    )
 }
-fn logic_or_parser() -> Parser<Expression> {
-    l_binary_parser(logic_and_parser, || operator_parser(&["or", "||"]))
+fn logic_or_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || logic_and_parser(skip_newline),
+        move || operator_parser(skip_newline, &["or", "||"]),
+    )
 }
-fn logic_and_parser() -> Parser<Expression> {
-    l_binary_parser(bit_or_parser, || operator_parser(&["and", "&&"]))
+fn logic_and_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || bit_or_parser(skip_newline),
+        move || operator_parser(skip_newline, &["and", "&&"]),
+    )
 }
-fn bit_or_parser() -> Parser<Expression> {
-    l_binary_parser(bit_xor_parser, || operator_parser(&["|"]))
+fn bit_or_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || bit_xor_parser(skip_newline),
+        move || operator_parser(skip_newline, &["|"]),
+    )
 }
-fn bit_xor_parser() -> Parser<Expression> {
-    l_binary_parser(bit_and_parser, || operator_parser(&["^"]))
+fn bit_xor_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || bit_and_parser(skip_newline),
+        move || operator_parser(skip_newline, &["^"]),
+    )
 }
-fn bit_and_parser() -> Parser<Expression> {
-    l_binary_parser(eq_parser, || operator_parser(&["&"]))
+fn bit_and_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || eq_parser(skip_newline),
+        move || operator_parser(skip_newline, &["&"]),
+    )
 }
-fn eq_parser() -> Parser<Expression> {
-    l_binary_parser(non_eq_parser, || operator_parser(&["==", "!="]))
+fn eq_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || non_eq_parser(skip_newline),
+        move || operator_parser(skip_newline, &["==", "!="]),
+    )
 }
-fn non_eq_parser() -> Parser<Expression> {
-    l_binary_parser(shift_parser, || operator_parser(&["<=", ">=", "<", ">"]))
+fn non_eq_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || shift_parser(skip_newline),
+        move || operator_parser(skip_newline, &["<=", ">=", "<", ">"]),
+    )
 }
-fn shift_parser() -> Parser<Expression> {
-    l_binary_parser(term_parser, || operator_parser(&["<<", ">>"]))
+fn shift_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || term_parser(skip_newline),
+        move || operator_parser(skip_newline, &["<<", ">>"]),
+    )
 }
-fn term_parser() -> Parser<Expression> {
-    l_binary_parser(product_parser, || operator_parser(&["+", "-"]))
+fn term_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || product_parser(skip_newline),
+        move || operator_parser(skip_newline, &["+", "-"]),
+    )
 }
-fn product_parser() -> Parser<Expression> {
-    l_binary_parser(unary_expression_parser, || {
-        operator_parser(&["*", "/", "%"])
-    })
+fn product_parser(skip_newline: bool) -> Parser<Expression> {
+    l_binary_parser(
+        move || unary_expression_parser(skip_newline),
+        move || operator_parser(skip_newline, &["*", "/", "%"]),
+    )
 }
-fn operator_parser(strings: &'static [&'static str]) -> Parser<Span<Operator>> {
-    symbols_parser(strings).map(|i| i.map(|i| Operator::try_from_str(i).unwrap()))
+fn operator_parser(skip_newline: bool, strings: &'static [&'static str]) -> Parser<Span<Operator>> {
+    symbols_parser(skip_newline, strings).map(|i| i.map(|i| Operator::try_from_str(i).unwrap()))
 }
 fn l_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
@@ -199,11 +230,11 @@ mod tests {
 
     #[test]
     fn binary_parser_test() {
-        let test = "a = b = c = 1 + 2 + 3 * 4 >= 5 and 6 * 7 < 8 or 9 == 10 == 11 == 12";
+        let test = "a = b = c = 1 + 2 + 3 * 4 >= 5 \nand 6 * 7 < 8 or 9 == 10 == 11 == 12";
         let answer =
             "(a)=((b)=((c)=((((((1)+(2))+((3)*(4)))>=(5))and(((6)*(7))<(8)))or((((9)==(10))==(11))==(12)))))";
         assert_eq!(
-            binary_expression_parser()
+            binary_expression_parser(true)
                 .parse(Scanner::new(test))
                 .unwrap()
                 .1

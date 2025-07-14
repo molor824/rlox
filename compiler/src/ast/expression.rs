@@ -78,6 +78,70 @@ impl fmt::Display for Expression {
     }
 }
 
-pub fn expression_parser() -> Parser<Expression> {
-    binary_expression_parser()
+pub fn inline_expression_parser() -> Parser<Expression> {
+    expression_parser(false)
+}
+pub fn multiline_expression_parser() -> Parser<Expression> {
+    expression_parser(true)
+}
+pub fn expression_parser(skip_newline: bool) -> Parser<Expression> {
+    binary_expression_parser(skip_newline)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::scanner::Scanner;
+
+    use super::*;
+
+    #[test]
+    fn inline_test() {
+        let test = r"a = (
+        3 
+        +
+         2
+    ) * 3 + 1 / ( 10 - a[0] 
+     
+    
+    )";
+        let answer = "(a)=((((3)+(2))*(3))+((1)/((10)-((a)[0]))))";
+        let result = inline_expression_parser()
+            .parse(Scanner::new(test))
+            .unwrap()
+            .1;
+        assert_eq!(result.to_string(), answer);
+
+        let err_test = r#"a =
+        "this should throw error"
+        +
+        301
+        "#;
+        let answer = "a";
+        // the expression parser never really throws error when the resulting string is incomplete, but compiles up to as much as it can
+        // and the resulting parser should only parse up to the "a" ident and no further
+        let err_result = inline_expression_parser()
+            .parse(Scanner::new(err_test))
+            .unwrap()
+            .1;
+        assert_eq!(err_result.to_string(), answer);
+    }
+
+    #[test]
+    fn multiline_test() {
+        let test = r"
+        (
+        a + b * c) / d
+        [0]
+        (1, 2, 3 * 
+        
+        
+        
+        10)";
+        let answer = "((a)+((b)*(c)))/(((d)[0])(1,2,(3)*(10)))";
+        let result = multiline_expression_parser()
+            .parse(Scanner::new(test))
+            .unwrap()
+            .1;
+        assert_eq!(result.to_string(), answer);
+    }
 }
