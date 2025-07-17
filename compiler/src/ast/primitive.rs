@@ -282,7 +282,7 @@ pub fn skip_parser(skip_newline: bool) -> Parser<Span<()>> {
         .fold(one_of, |a, b| a.combine(b, |_, _| ()))
         .or_else(|e| Parser::new_ok(Span::from_len(e.start, 0, ())))
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ident(pub Span<Rc<str>>);
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
