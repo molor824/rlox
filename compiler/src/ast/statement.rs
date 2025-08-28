@@ -3,7 +3,6 @@ use crate::ast::expression::multiline_expression_parser;
 use crate::ast::strings_eq_parser;
 use crate::{
     ast::{
-        char_match_parser,
         expression::{inline_expression_parser, Expression},
         primary::symbol_parser,
         primitive::skip_parser,
