@@ -1,3 +1,4 @@
+use crate::ast::error::Error;
 use crate::ast::expression::{expression_parser, multiline_expression_parser};
 use crate::span::Span;
 
@@ -11,6 +12,7 @@ pub fn primary_parser(skip_newline: bool) -> Parser<Expression> {
         .or_else(move |_| ident_parser(skip_newline).map(Expression::Ident))
         .or_else(move |_| group_parser(skip_newline))
         .or_else(move |_| array_parser(skip_newline))
+        .map_err(|err| err.map(|_| Error::NoExpression))
 }
 
 fn group_parser(skip_newline: bool) -> Parser<Expression> {

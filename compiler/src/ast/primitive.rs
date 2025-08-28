@@ -233,7 +233,7 @@ fn string_not_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
         }
     })
 }
-fn whitespace_parser(skip_newline: bool) -> Parser<Span<()>> {
+fn whitespace_parser(skip_newline: bool) -> Parser<()> {
     char_match_parser(move |ch| {
         if skip_newline {
             ch.is_whitespace()
@@ -241,46 +241,43 @@ fn whitespace_parser(skip_newline: bool) -> Parser<Span<()>> {
             ch.is_whitespace() && ch != '\n'
         }
     })
-    .map(|ch| ch.map(|_| ()))
+    .map(|_| ())
 }
-fn line_comment_parser() -> Parser<Span<()>> {
-    string_eq_parser("//").and_then(|comment| {
+fn line_comment_parser() -> Parser<()> {
+    string_eq_parser("//").and_then(|_| {
         char_match_parser(|ch| ch != '\n')
-            .map(move |ch| comment.combine(ch, |_, _| ()))
-            .or_else(move |_| Parser::new_ok(comment.map(|_| ())))
-            .fold(
-                || char_match_parser(|ch| ch != '\n'),
-                |ch, ch1| ch.combine(ch1, |_, _| ()),
-            )
+            .map(move |_| ())
+            .or_else(move |_| Parser::new_ok(()))
+            .fold(|| char_match_parser(|ch| ch != '\n'), |_, _| ())
     })
 }
-fn block_comment_parser() -> Parser<Span<()>> {
-    string_eq_parser("/*").and_then(|comment| {
+fn block_comment_parser() -> Parser<()> {
+    string_eq_parser("/*").and_then(|_| {
         string_not_eq_parser("*/")
-            .map(move |_| comment.map(|_| ()))
-            .or_else(move |_| Parser::new_ok(comment.map(|_| ())))
+            .map(move |_| ())
+            .or_else(move |_| Parser::new_ok(()))
             .fold(
                 move || string_not_eq_parser("*/").and_then(move |_| next_char_parser()),
-                |comment, ch| comment.combine(ch, |_, _| ()),
+                |_, _| (),
             )
-            .and_then(|comment| {
+            .and_then(|_| {
                 string_eq_parser("*/")
-                    .map(move |end| comment.combine(end, |_, _| ()))
-                    .or_else(move |_| Parser::new_ok(comment))
+                    .map(move |_| ())
+                    .or_else(move |_| Parser::new_ok(()))
             })
     })
 }
 // The language uses newline as a seperator instead of ; or anything else
 // However, if an expression is inside parenthesis, then until the parenthesis ends, newline won't be treated as a seperator
-pub fn skip_parser(skip_newline: bool) -> Parser<Span<()>> {
+pub fn skip_parser(skip_newline: bool) -> Parser<()> {
     let one_of = move || {
         whitespace_parser(skip_newline)
             .or_else(|_| line_comment_parser())
             .or_else(|_| block_comment_parser())
     };
     one_of()
-        .fold(one_of, |a, b| a.combine(b, |_, _| ()))
-        .or_else(|e| Parser::new_ok(Span::from_len(e.start, 0, ())))
+        .fold(one_of, |_, _| ())
+        .or_else(|_| Parser::new_ok(()))
 }
 #[derive(Debug, Clone)]
 pub struct Ident(pub Span<Rc<str>>);

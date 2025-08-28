@@ -64,6 +64,12 @@ impl<T: 'static> Parser<T> {
             n => n,
         })
     }
+    pub fn optional(self) -> Parser<Option<T>> {
+        Parser::new(move |scanner| match self.parse(scanner.clone()) {
+            Ok((next, result)) => Ok((next, Some(result))),
+            Err(_) => Ok((scanner, None)),
+        })
+    }
     pub fn fold<U: 'static>(
         self,
         mut parser: impl FnMut() -> Parser<U> + 'static,
