@@ -116,33 +116,33 @@ pub fn statement_parser() -> Parser<Statement> {
 }
 pub fn keyword_parser(keyword: &'static str) -> Parser<Span<&'static str>> {
     ident_parser(true).and_then(move |ident| {
-        if ident.slice() == keyword {
+        if ident.str() == keyword {
             Parser::new_ok(ident.0.map(|_| keyword))
         } else {
-            let str = ident.slice().to_string();
+            let str = ident.str().to_string();
             Parser::new_err(ident.0.map(|_| Error::InvalidKeyword(str)))
         }
     })
 }
 pub fn keywords_parser(keywords: &'static [&'static str]) -> Parser<Span<&'static str>> {
     ident_parser(true).and_then(move |ident| {
-        if let Some(&keyword) = keywords.into_iter().find(|&&k| k == ident.slice()) {
+        if let Some(&keyword) = keywords.into_iter().find(|&&k| k == ident.str()) {
             Parser::new_ok(ident.0.map(|_| keyword))
         } else {
-            let str = ident.slice().to_string();
+            let str = ident.str().to_string();
             Parser::new_err(ident.0.map(|_| Error::InvalidKeyword(str)))
         }
     })
 }
 fn statements_parser() -> Parser<Statements> {
     // Series of keywords that indicate the end of current statements scope
-    const TERMINATORS: &[&str] = &["end", "elif", "onbreak", "oncontinue"];
+    const TERMINATORS: &[&str] = &["end", "else", "elif", "onbreak", "oncontinue"];
     fn seperator_parser() -> Parser<Span<&'static str>> {
         skip_parser(false).and_then(|_| strings_eq_parser(&[";", "\n", "\r\n"]))
     }
     fn stmt_parser() -> Parser<Statement> {
         skip_parser(true).and_then(|_| {
-            strings_eq_parser(TERMINATORS).then_or(
+            keywords_parser(TERMINATORS).then_or(
                 |_| Parser::new_err(Span::new(0, 0, Error::Eof)),
                 |_| statement_parser(),
             )
@@ -297,7 +297,7 @@ mod tests {
 .$((b)())
 .$((c)())
 $end";
-        let result = statement_parser().parse(Scanner::new(test)).unwrap().1;
+        let result = statement_parser().parse(Scanner::new(test.chars())).unwrap().1;
         assert_eq!(result.to_string(), answer);
     }
 }

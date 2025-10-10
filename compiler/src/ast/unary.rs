@@ -141,7 +141,7 @@ mod tests {
         let answer = "-(!(~(~(ident))))";
         assert_eq!(
             unary_expression_parser(true)
-                .parse(Scanner::new(test))
+                .parse(Scanner::new(test.chars()))
                 .unwrap()
                 .1
                 .to_string(),
@@ -154,7 +154,7 @@ mod tests {
         let answer = "((a).c)((((((d)[(f)(1,2)]).e)(3))(4))[5])";
         assert_eq!(
             unary_expression_parser(true)
-                .parse(Scanner::new(test))
+                .parse(Scanner::new(test.chars()))
                 .unwrap()
                 .1
                 .to_string(),

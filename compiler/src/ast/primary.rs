@@ -80,7 +80,7 @@ mod tests {
             "(1)+((2)+((3)*((4)+(5))))",
         ];
         for (test, answer) in tests.into_iter().zip(answers) {
-            let (_, result) = primary_parser(false).parse(Scanner::new(test)).unwrap();
+            let (_, result) = primary_parser(false).parse(Scanner::new(test.chars())).unwrap();
             assert_eq!(result.to_string(), answer);
         }
     }

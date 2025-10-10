@@ -1,7 +1,6 @@
-use super::{error::Error, expression::Number, scanner::Scanner, *};
+use super::{error::Error, expression::Number, *};
 use num_bigint::{BigInt, BigUint};
 use std::fmt;
-use std::rc::Rc;
 
 fn digit_parser(radix: u32) -> Parser<Span<u8>> {
     next_char_parser().and_then(move |ch| match ch.value.to_digit(radix) {
@@ -216,20 +215,25 @@ pub fn char_lit_parser(skip_newline: bool) -> Parser<Span<char>> {
             })
     })
 }
-fn string_not_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
-    Parser::new(move |Scanner { source, offset }| {
-        if source[offset..].starts_with(&string) {
-            let len = source.len();
+fn string_not_eq_parser(string: &'static str) -> Parser<Span<()>> {
+    Parser::new(move |source| {
+        let end_offset = source.offset + string.len();
+        while source.source.borrow().len() < end_offset {
+            let Some(ch) = source.iter.borrow_mut().next() else {
+                let offset = source.offset;
+                return Ok((source, Span::from_len(offset, 0, ())));
+            };
+            source.source.borrow_mut().push(ch);
+        }
+        if &source.source.borrow()[source.offset..end_offset] == string {
             Err(Span::from_len(
-                offset,
-                len,
+                source.offset,
+                end_offset,
                 Error::UnexpectedString(string.to_string()),
             ))
         } else {
-            Ok((
-                Scanner { source, offset },
-                Span::from_len(offset, 0, string),
-            ))
+            let offset = source.offset;
+            Ok((source, Span::from_len(offset, 0, ())))
         }
     })
 }
@@ -280,18 +284,18 @@ pub fn skip_parser(skip_newline: bool) -> Parser<()> {
         .or_else(|_| Parser::new_ok(()))
 }
 #[derive(Debug, Clone)]
-pub struct Ident(pub Span<Rc<str>>);
+pub struct Ident(pub Span<String>);
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", &self.0.value[self.0.start..self.0.end])
+        write!(f, "{}", self.0.value)
     }
 }
 impl Ident {
     pub fn span(&self) -> Span<()> {
         Span::new(self.0.start, self.0.end, ())
     }
-    pub fn slice(&self) -> &str {
-        &self.0.value[self.0.start..self.0.end]
+    pub fn str(&self) -> &str {
+        &self.0.value
     }
 }
 pub fn ident_parser(skip_newline: bool) -> Parser<Ident> {
@@ -302,7 +306,11 @@ pub fn ident_parser(skip_newline: bool) -> Parser<Ident> {
                 |a, b| a.combine(b, |_, _| '\0'),
             )
             .and_then(|ident| {
-                Parser::new_ok_with(move |scanner| Ident(ident.map(|_| scanner.source)))
+                Parser::new_ok_with(move |scanner| {
+                    Ident(
+                        ident.map(|_| scanner.source.borrow()[ident.start..ident.end].to_string()),
+                    )
+                })
             })
     })
 }

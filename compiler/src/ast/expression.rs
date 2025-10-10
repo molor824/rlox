@@ -106,7 +106,7 @@ mod tests {
     )";
         let answer = "(a)=((((3)+(2))*(3))+((1)/((10)-((a)[0]))))";
         let result = inline_expression_parser()
-            .parse(Scanner::new(test))
+            .parse(Scanner::new(test.chars()))
             .unwrap()
             .1;
         assert_eq!(result.to_string(), answer);
@@ -120,7 +120,7 @@ mod tests {
         // the expression parser never really throws error when the resulting string is incomplete, but compiles up to as much as it can
         // and the resulting parser should only parse up to the "a" ident and no further
         let err_result = inline_expression_parser()
-            .parse(Scanner::new(err_test))
+            .parse(Scanner::new(err_test.chars()))
             .unwrap()
             .1;
         assert_eq!(err_result.to_string(), answer);
@@ -139,7 +139,7 @@ mod tests {
         10)";
         let answer = "((a)+((b)*(c)))/(((d)[0])(1,2,(3)*(10)))";
         let result = multiline_expression_parser()
-            .parse(Scanner::new(test))
+            .parse(Scanner::new(test.chars()))
             .unwrap()
             .1;
         assert_eq!(result.to_string(), answer);

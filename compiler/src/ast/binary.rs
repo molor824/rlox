@@ -235,7 +235,7 @@ mod tests {
             "(a)=((b)=((c)=((((((1)+(2))+((3)*(4)))>=(5))and(((6)*(7))<(8)))or((((9)==(10))==(11))==(12)))))";
         assert_eq!(
             binary_expression_parser(true)
-                .parse(Scanner::new(test))
+                .parse(Scanner::new(test.chars()))
                 .unwrap()
                 .1
                 .to_string(),

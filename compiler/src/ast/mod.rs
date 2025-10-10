@@ -94,43 +94,39 @@ fn next_char_parser() -> Parser<Span<char>> {
     })
 }
 fn string_eq_parser(string: &'static str) -> Parser<Span<&'static str>> {
-    Parser::new(move |Scanner { source, offset }| {
-        if source[offset..].starts_with(&string) {
-            Ok((
-                Scanner {
-                    offset: offset + string.len(),
-                    source,
-                },
-                Span::new(offset, offset + string.len(), string),
-            ))
+    Parser::new(move |mut scanner| {
+        let offset = scanner.offset;
+        let end_offset = scanner.offset + string.len();
+        while scanner.source.borrow().len() < end_offset {
+            let Some(ch) = scanner.iter.borrow_mut().next() else {
+                break;
+            };
+            scanner.source.borrow_mut().push(ch);
+        }
+        if scanner.source.borrow()[offset..].starts_with(string) {
+            scanner.offset += string.len();
+            Ok((scanner, Span::new(offset, end_offset, string)))
         } else {
             Err(Span::from_len(
                 offset,
                 0,
-                Error::ExpectedString(string.into()),
+                Error::ExpectedString(string.to_string()),
             ))
         }
     })
 }
 fn strings_eq_parser(strings: &'static [&'static str]) -> Parser<Span<&'static str>> {
-    Parser::new(move |Scanner { source, offset }| {
-        match strings
-            .into_iter()
-            .find(|&s| source[offset..].starts_with(s))
-        {
-            Some(&str) => Ok((
-                Scanner {
-                    source,
-                    offset: offset + str.len(),
-                },
-                Span::new(offset, offset + str.len(), str),
-            )),
-            None => Err(Span::from_len(
-                offset,
-                0,
-                Error::ExpectedStrings(strings.iter().map(|s| s.to_string()).collect()),
-            )),
+    Parser::new(move |scanner| {
+        for &str in strings {
+            if let Ok(a) = string_eq_parser(str).parse(scanner.clone()) {
+                return Ok(a);
+            }
         }
+        Err(Span::from_len(
+            scanner.offset,
+            0,
+            Error::ExpectedStrings(strings.into_iter().map(|s| s.to_string()).collect()),
+        ))
     })
 }
 fn char_eq_parser(ch: char) -> Parser<Span<char>> {
