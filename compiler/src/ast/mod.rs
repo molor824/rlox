@@ -1,7 +1,6 @@
+use crate::span::Span;
 use error::Error;
 use scanner::Scanner;
-
-use crate::span::Span;
 
 mod binary;
 mod error;
@@ -9,7 +8,7 @@ pub mod expression;
 mod primary;
 mod primitive;
 pub mod scanner;
-mod statement;
+pub mod statement;
 mod unary;
 
 pub type ParseResult<T> = Result<(Scanner, T), Span<Error>>;

@@ -42,6 +42,8 @@ pub enum Error {
     UnicodeOverflow,
     #[error("invalid unicode")]
     InvalidUnicode,
+    #[error("invalid keyword {0}")]
+    InvalidKeyword(String),
     #[error("no expression found")]
     NoExpression,
 }

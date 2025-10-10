@@ -4,7 +4,6 @@ use crate::ast::strings_eq_parser;
 use crate::{
     ast::{
         expression::{inline_expression_parser, Expression},
-        primary::symbol_parser,
         primitive::skip_parser,
         Parser,
     },
@@ -13,6 +12,7 @@ use crate::{
 use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
+use crate::ast::primitive::ident_parser;
 
 #[derive(Clone)]
 pub enum Statement {
@@ -24,7 +24,7 @@ pub enum Statement {
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
-            Self::Expression(expr) => write!(f, "$expr({})", expr),
+            Self::Expression(expr) => write!(f, "$({})", expr),
             Self::If(ifstmt) => write!(f, "{}", ifstmt),
             Self::While(whilestmt) => write!(f, "{}", whilestmt),
             Self::Block(block) => write!(f, "do\n{}\nend", block.to_string_indent()),
@@ -71,7 +71,7 @@ impl fmt::Display for WhileStmt {
     }
 }
 #[derive(Clone)]
-enum ElseBlock {
+pub enum ElseBlock {
     Elif(Box<IfStmt>),
     Else(Statements),
 }
@@ -85,7 +85,7 @@ impl fmt::Display for IfStmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "$if {} then{}\n",
+            "$if {} do{}\n",
             self.condition,
             self.then_block.to_string_indent()
         )?;
@@ -114,12 +114,29 @@ pub fn statement_parser() -> Parser<Statement> {
             .or_else(|_| inline_expression_parser().map(Statement::Expression))
     })
 }
-fn keyword_parser(keyword: &'static str) -> Parser<Span<&'static str>> {
-    symbol_parser(true, keyword)
+pub fn keyword_parser(keyword: &'static str) -> Parser<Span<&'static str>> {
+    ident_parser(true).and_then(move |ident| {
+        if ident.slice() == keyword {
+            Parser::new_ok(ident.0.map(|_| keyword))
+        } else {
+            let str = ident.slice().to_string();
+            Parser::new_err(ident.0.map(|_| Error::InvalidKeyword(str)))
+        }
+    })
+}
+pub fn keywords_parser(keywords: &'static [&'static str]) -> Parser<Span<&'static str>> {
+    ident_parser(true).and_then(move |ident| {
+        if let Some(&keyword) = keywords.into_iter().find(|&&k| k == ident.slice()) {
+            Parser::new_ok(ident.0.map(|_| keyword))
+        } else {
+            let str = ident.slice().to_string();
+            Parser::new_err(ident.0.map(|_| Error::InvalidKeyword(str)))
+        }
+    })
 }
 fn statements_parser() -> Parser<Statements> {
     // Series of keywords that indicate the end of current statements scope
-    const TERMINATORS: &[&str] = &["end", "else", "elif", "onbreak", "oncontinue"];
+    const TERMINATORS: &[&str] = &["end", "elif", "onbreak", "oncontinue"];
     fn seperator_parser() -> Parser<Span<&'static str>> {
         skip_parser(false).and_then(|_| strings_eq_parser(&[";", "\n", "\r\n"]))
     }
@@ -146,7 +163,7 @@ fn statements_parser() -> Parser<Statements> {
                 stmts
             },
         )
-        .and_then(|mut stmts| {
+        .and_then(|stmts| {
             stmt_parser()
                 .map({
                     let mut stmts = stmts.clone();
@@ -169,7 +186,7 @@ fn if_stmt_parser() -> Parser<IfStmt> {
     // and allows to recursively join in elif case
     fn _if_stmt_parser() -> Parser<IfStmt> {
         multiline_expression_parser()
-            .and_then(|condition| keyword_parser("then").map(move |_| condition))
+            .and_then(|condition| keyword_parser("do").map(move |_| condition))
             .and_then(|condition| statements_parser().map(move |stmts| (condition, stmts)))
             .map(|(condition, stmts)| (Rc::new(condition), Rc::new(stmts)))
             .and_then(|(condition, stmts)| {
@@ -261,7 +278,7 @@ mod tests {
     #[test]
     fn stmts_test() {
         let test = r"
-        while a < b do
+        if a < b do
 
 
 
@@ -275,10 +292,10 @@ mod tests {
 
         end
         ";
-        let answer = r"$while (a)<(b) do
-.$expr((a)())
-.$expr((b)())
-.$expr((c)())
+        let answer = r"$if (a)<(b) do
+.$((a)())
+.$((b)())
+.$((c)())
 $end";
         let result = statement_parser().parse(Scanner::new(test)).unwrap().1;
         assert_eq!(result.to_string(), answer);

@@ -290,6 +290,9 @@ impl Ident {
     pub fn span(&self) -> Span<()> {
         Span::new(self.0.start, self.0.end, ())
     }
+    pub fn slice(&self) -> &str {
+        &self.0.value[self.0.start..self.0.end]
+    }
 }
 pub fn ident_parser(skip_newline: bool) -> Parser<Ident> {
     skip_parser(skip_newline).and_then(|_| {

@@ -1,16 +1,13 @@
-use compiler::ast::expression::inline_expression_parser;
-use compiler::ast::scanner::Scanner;
 use std::io::stdin;
+use compiler::ast::scanner::Scanner;
+use compiler::ast::statement::statement_parser;
 
 fn main() {
-    let mut line = String::new();
     loop {
-        line.clear();
+        let mut line = String::new();
         stdin().read_line(&mut line).unwrap();
-
-        let parser = inline_expression_parser();
-        let (_, result) = parser.parse(Scanner::new(line.trim())).unwrap();
-
-        println!("{}", result);
+        
+        let value = statement_parser().parse(Scanner::new(line)).unwrap().1;
+        println!("{}", value);
     }
 }
