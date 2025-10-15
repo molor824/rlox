@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::span::Span;
+use crate::span::SpanOf;
 
 use super::{
     expression::Expression, primary::symbols_parser, unary::unary_expression_parser, Parser,
@@ -10,7 +10,7 @@ use super::{
 pub struct Binary {
     pub left: Box<Expression>,
     pub right: Box<Expression>,
-    pub operator: Span<Operator>,
+    pub operator: SpanOf<Operator>,
 }
 impl fmt::Display for Binary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -181,12 +181,12 @@ fn product_parser(skip_newline: bool) -> Parser<Expression> {
         move || operator_parser(skip_newline, &["*", "/", "%"]),
     )
 }
-fn operator_parser(skip_newline: bool, strings: &'static [&'static str]) -> Parser<Span<Operator>> {
+fn operator_parser(skip_newline: bool, strings: &'static [&'static str]) -> Parser<SpanOf<Operator>> {
     symbols_parser(skip_newline, strings).map(|i| i.map(|i| Operator::try_from_str(i).unwrap()))
 }
 fn l_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
-    mut operator: impl FnMut() -> Parser<Span<Operator>> + 'static,
+    mut operator: impl FnMut() -> Parser<SpanOf<Operator>> + 'static,
 ) -> Parser<Expression> {
     lower().fold(
         move || {
@@ -204,7 +204,7 @@ fn l_binary_parser(
 }
 fn r_binary_parser(
     mut lower: impl FnMut() -> Parser<Expression> + 'static,
-    mut operator: impl FnMut() -> Parser<Span<Operator>> + 'static,
+    mut operator: impl FnMut() -> Parser<SpanOf<Operator>> + 'static,
 ) -> Parser<Expression> {
     let lower1 = lower();
     lower()

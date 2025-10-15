@@ -1,7 +1,7 @@
 use super::{
     binary::{binary_expression_parser, Binary},
     unary::PrefixUnary,
-    Parser, Span,
+    Parser, SpanOf,
 };
 use std::fmt;
 
@@ -44,11 +44,11 @@ impl fmt::Display for Number {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Ident(Ident),
-    CharLit(Span<char>),
-    StrLit(Span<String>),
-    Number(Span<Number>),
-    Group(Span<Box<Expression>>),
-    Array(Span<Vec<Expression>>),
+    CharLit(SpanOf<char>),
+    StrLit(SpanOf<String>),
+    Number(SpanOf<Number>),
+    Group(SpanOf<Box<Expression>>),
+    Array(SpanOf<Vec<Expression>>),
     PrefixUnary(PrefixUnary),
     PostfixUnary(PostfixUnary),
     Binary(Binary),

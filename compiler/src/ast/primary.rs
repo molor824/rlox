@@ -1,6 +1,6 @@
 use crate::ast::error::Error;
 use crate::ast::expression::{expression_parser, multiline_expression_parser};
-use crate::span::Span;
+use crate::span::SpanOf;
 
 use super::{expression::Expression, primitive::*, string_eq_parser, strings_eq_parser, Parser};
 
@@ -43,13 +43,13 @@ pub fn args_parser(skip_newline: bool) -> Parser<Vec<Expression>> {
     )
 }
 
-pub fn symbol_parser(skip_newline: bool, symbol: &'static str) -> Parser<Span<&'static str>> {
+pub fn symbol_parser(skip_newline: bool, symbol: &'static str) -> Parser<SpanOf<&'static str>> {
     skip_parser(skip_newline).and_then(move |_| string_eq_parser(symbol))
 }
 pub fn symbols_parser(
     skip_newline: bool,
     symbols: &'static [&'static str],
-) -> Parser<Span<&'static str>> {
+) -> Parser<SpanOf<&'static str>> {
     skip_parser(skip_newline).and_then(move |_| strings_eq_parser(symbols))
 }
 

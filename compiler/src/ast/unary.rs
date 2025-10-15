@@ -1,4 +1,4 @@
-use super::{expression::Expression, Parser, Span, *};
+use super::{expression::Expression, *};
 use crate::ast::expression::inline_expression_parser;
 use crate::ast::primary::{args_parser, symbol_parser};
 use crate::ast::primitive::{ident_parser, Ident};
@@ -32,7 +32,7 @@ impl fmt::Display for PrefixOperator {
 }
 #[derive(Debug, Clone)]
 pub struct PrefixUnary {
-    pub operator: Span<PrefixOperator>,
+    pub operator: SpanOf<PrefixOperator>,
     pub operand: Box<Expression>,
 }
 impl fmt::Display for PrefixUnary {
@@ -65,7 +65,7 @@ impl fmt::Display for PostfixOperator {
 }
 #[derive(Debug, Clone)]
 pub struct PostfixUnary {
-    pub operator: Span<PostfixOperator>,
+    pub operator: SpanOf<PostfixOperator>,
     pub operand: Box<Expression>,
 }
 impl fmt::Display for PostfixUnary {
@@ -105,13 +105,16 @@ fn postfix_unary_parser(skip_newline: bool) -> Parser<Expression> {
         },
     )
 }
-fn postfix_property_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
+fn postfix_property_parser(skip_newline: bool) -> Parser<SpanOf<PostfixOperator>> {
     symbol_parser(skip_newline, ".").and_then(move |dot| {
-        ident_parser(skip_newline)
-            .map(move |ident| dot.combine(ident.span(), |_, _| PostfixOperator::Property(ident)))
+        ident_parser(skip_newline).map(move |ident| {
+            dot.combine(ident.0.clone().add_value(()), |_, _| {
+                PostfixOperator::Property(ident)
+            })
+        })
     })
 }
-fn postfix_index_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
+fn postfix_index_parser(skip_newline: bool) -> Parser<SpanOf<PostfixOperator>> {
     symbol_parser(skip_newline, "[")
         .and_then(|lparen| inline_expression_parser().map(move |expr| (lparen, expr)))
         .and_then(move |(lparen, expr)| {
@@ -120,7 +123,7 @@ fn postfix_index_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
             })
         })
 }
-fn postfix_call_parser(skip_newline: bool) -> Parser<Span<PostfixOperator>> {
+fn postfix_call_parser(skip_newline: bool) -> Parser<SpanOf<PostfixOperator>> {
     symbol_parser(skip_newline, "(").and_then(move |lparen| {
         args_parser(skip_newline)
             .or_else(|_| Parser::new_ok(vec![]))

@@ -1,14 +1,15 @@
 use super::{error::Error, expression::Number, *};
 use num_bigint::{BigInt, BigUint};
+use std::cell::Ref;
 use std::fmt;
 
-fn digit_parser(radix: u32) -> Parser<Span<u8>> {
+fn digit_parser(radix: u32) -> Parser<SpanOf<u8>> {
     next_char_parser().and_then(move |ch| match ch.value.to_digit(radix) {
         Some(d) => Parser::new_ok(ch.map(|_| d as u8)),
         None => Parser::new_err(ch.map(|_| Error::CharNotDigit)),
     })
 }
-fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
+fn integer_parser(radix: u32) -> Parser<SpanOf<BigUint>> {
     digit_parser(radix)
         .map_err(|e| e.map(|_| Error::ExpectedInt))
         .map(|d| d.map(|d| BigUint::from(d)))
@@ -26,28 +27,36 @@ fn integer_parser(radix: u32) -> Parser<Span<BigUint>> {
             },
         )
 }
-fn decimal_parser(radix: u32) -> Parser<Span<Number>> {
+fn decimal_parser(radix: u32) -> Parser<SpanOf<Number>> {
     integer_parser(radix).and_then(move |whole| {
         char_eq_parser('.')
             .and_then(move |dot| {
                 integer_parser(radix)
-                    .map(move |frac| dot.combine(frac, |_, frac| frac))
+                    .map({
+                        let dot = dot.clone();
+                        move |frac| dot.combine(frac, |_, frac| frac)
+                    })
                     .or_else(move |_| Parser::new_ok(dot.map(|_| BigUint::ZERO)))
             })
             .map({
                 let whole = whole.clone();
                 move |frac| {
-                    let frac_len = frac.end - frac.start - 1;
+                    let frac_count = frac
+                        .span
+                        .as_slice()
+                        .chars()
+                        .filter(|ch| ch.is_digit(radix))
+                        .count();
                     whole.combine(frac, |wh, fr| Number {
                         radix,
                         integer: {
                             let mut integer = wh;
-                            for _ in 0..frac_len {
+                            for _ in 0..frac_count {
                                 integer *= radix;
                             }
                             integer + fr
                         },
-                        exponent: Some(-(frac_len as i32)),
+                        exponent: Some(-(frac_count as i32)),
                     })
                 }
             })
@@ -60,7 +69,7 @@ fn decimal_parser(radix: u32) -> Parser<Span<Number>> {
             })
     })
 }
-fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
+fn exponent_parser(radix: u32) -> Parser<SpanOf<Number>> {
     decimal_parser(radix).and_then(move |decimal| {
         if radix <= 10 {
             chars_eq_parser(&['e', 'E'])
@@ -85,8 +94,8 @@ fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
                 .and_then({
                     let decimal = decimal.clone();
                     move |exponent| {
-                        let mut exp = BigInt::from(exponent.value);
-                        if let Some(Span { value: '-', .. }) = sign {
+                        let mut exp = BigInt::from(exponent.value.clone());
+                        if let Some(SpanOf { value: '-', .. }) = sign {
                             exp = -exp;
                         }
                         if let Some(old_exp) = decimal.value.exponent {
@@ -95,22 +104,14 @@ fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
                         let exp = match i32::try_from(exp) {
                             Ok(exp) => exp,
                             Err(_) => {
-                                return Parser::new_err(Span::new(
-                                    exponent.start,
-                                    exponent.end,
-                                    Error::ExponentOverflow,
-                                ))
+                                return Parser::new_err(exponent.replace(Error::ExponentOverflow))
                             }
                         };
-                        Parser::new_ok(Span::new(
-                            decimal.start,
-                            exponent.end,
-                            Number {
-                                radix: decimal.value.radix,
-                                integer: decimal.value.integer,
-                                exponent: Some(exp),
-                            },
-                        ))
+                        Parser::new_ok(decimal.combine(exponent, |d, _| Number {
+                            radix: d.radix,
+                            integer: d.integer,
+                            exponent: Some(exp),
+                        }))
                     }
                 })
                 .or_else(move |_| Parser::new_err(decimal.map(|_| Error::MissingExponent)))
@@ -118,7 +119,7 @@ fn exponent_parser(radix: u32) -> Parser<Span<Number>> {
         .or_else(move |_| Parser::new_ok(decimal))
     })
 }
-fn radix_parser() -> Parser<Span<u32>> {
+fn radix_parser() -> Parser<SpanOf<u32>> {
     char_eq_parser('0').and_then(move |zero| {
         char_eq_parser('b')
             .map(|ch| ch.map(|_| 2_u32))
@@ -128,14 +129,14 @@ fn radix_parser() -> Parser<Span<u32>> {
             .map_err(|err| err.map(|_| Error::ExpectedBase))
     })
 }
-pub fn number_parser(skip_newline: bool) -> Parser<Span<Number>> {
+pub fn number_parser(skip_newline: bool) -> Parser<SpanOf<Number>> {
     skip_parser(skip_newline).and_then(|_| {
         radix_parser()
             .and_then(|radix| exponent_parser(radix.value).map(move |n| radix.combine(n, |_, n| n)))
             .or_else(|_| exponent_parser(10))
     })
 }
-fn escape_char_parser() -> Parser<Span<char>> {
+fn escape_char_parser() -> Parser<SpanOf<char>> {
     char_eq_parser('\\')
         .and_then(|slash| next_char_parser().map(move |ch| slash.combine(ch, |_, ch| ch)))
         .and_then(move |ch| match ch.value {
@@ -173,7 +174,7 @@ fn escape_char_parser() -> Parser<Span<char>> {
         })
         .map_err(|err| err.map(|_| Error::MissingEscape))
 }
-pub fn string_lit_parser(skip_newline: bool) -> Parser<Span<String>> {
+pub fn string_lit_parser(skip_newline: bool) -> Parser<SpanOf<String>> {
     skip_parser(skip_newline).and_then(|_| {
         char_eq_parser('"')
             .map(|q| q.map(|_| String::new()))
@@ -199,13 +200,14 @@ pub fn string_lit_parser(skip_newline: bool) -> Parser<Span<String>> {
             })
     })
 }
-pub fn char_lit_parser(skip_newline: bool) -> Parser<Span<char>> {
+pub fn char_lit_parser(skip_newline: bool) -> Parser<SpanOf<char>> {
     skip_parser(skip_newline).and_then(|_| {
         char_eq_parser('\'')
             .and_then(move |q| {
+                let q1 = q.clone();
                 escape_char_parser()
                     .or_else(move |_| char_match_parser(|ch| ch != '\'' && ch != '\n'))
-                    .map_err(move |err| q.combine(err, |_, _| Error::CharLiteralEmpty))
+                    .map_err(move |err| q1.combine(err, |_, _| Error::CharLiteralEmpty))
                     .map(move |ch| q.combine(ch, |_, ch| ch))
             })
             .and_then(move |ch| {
@@ -215,25 +217,23 @@ pub fn char_lit_parser(skip_newline: bool) -> Parser<Span<char>> {
             })
     })
 }
-fn string_not_eq_parser(string: &'static str) -> Parser<Span<()>> {
+fn string_not_eq_parser(string: &'static str) -> Parser<()> {
     Parser::new(move |source| {
         let end_offset = source.offset + string.len();
         while source.source.borrow().len() < end_offset {
             let Some(ch) = source.iter.borrow_mut().next() else {
-                let offset = source.offset;
-                return Ok((source, Span::from_len(offset, 0, ())));
+                return Ok((source, ()));
             };
             source.source.borrow_mut().push(ch);
         }
         if &source.source.borrow()[source.offset..end_offset] == string {
-            Err(Span::from_len(
-                source.offset,
-                end_offset,
+            Parser::new_err_range(
+                source.offset..end_offset,
                 Error::UnexpectedString(string.to_string()),
-            ))
+            )
+            .parse(source)
         } else {
-            let offset = source.offset;
-            Ok((source, Span::from_len(offset, 0, ())))
+            Ok((source, ()))
         }
     })
 }
@@ -284,33 +284,25 @@ pub fn skip_parser(skip_newline: bool) -> Parser<()> {
         .or_else(|_| Parser::new_ok(()))
 }
 #[derive(Debug, Clone)]
-pub struct Ident(pub Span<String>);
+pub struct Ident(pub Span);
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.value)
+        write!(f, "{}", self.0.as_slice())
     }
 }
 impl Ident {
-    pub fn span(&self) -> Span<()> {
-        Span::new(self.0.start, self.0.end, ())
-    }
-    pub fn str(&self) -> &str {
-        &self.0.value
+    pub fn as_str(&self) -> Ref<'_, str> {
+        self.0.as_slice()
     }
 }
 pub fn ident_parser(skip_newline: bool) -> Parser<Ident> {
     skip_parser(skip_newline).and_then(|_| {
         char_match_parser(|ch| ch.is_alphabetic() || ch == '_')
+            .map(|ch| ch.span)
             .fold(
-                || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_'),
-                |a, b| a.combine(b, |_, _| '\0'),
+                || char_match_parser(|ch| ch.is_alphanumeric() || ch == '_').map(|ch| ch.span),
+                |a, b| a.concat(b),
             )
-            .and_then(|ident| {
-                Parser::new_ok_with(move |scanner| {
-                    Ident(
-                        ident.map(|_| scanner.source.borrow()[ident.start..ident.end].to_string()),
-                    )
-                })
-            })
+            .map(Ident)
     })
 }

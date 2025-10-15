@@ -1,5 +1,6 @@
 use crate::ast::error::Error;
 use crate::ast::expression::multiline_expression_parser;
+use crate::ast::primitive::ident_parser;
 use crate::ast::strings_eq_parser;
 use crate::{
     ast::{
@@ -7,12 +8,11 @@ use crate::{
         primitive::skip_parser,
         Parser,
     },
-    span::Span,
+    span::SpanOf,
 };
 use std::fmt;
 use std::fmt::Formatter;
 use std::rc::Rc;
-use crate::ast::primitive::ident_parser;
 
 #[derive(Clone)]
 pub enum Statement {
@@ -114,36 +114,36 @@ pub fn statement_parser() -> Parser<Statement> {
             .or_else(|_| inline_expression_parser().map(Statement::Expression))
     })
 }
-pub fn keyword_parser(keyword: &'static str) -> Parser<Span<&'static str>> {
+pub fn keyword_parser(keyword: &'static str) -> Parser<SpanOf<&'static str>> {
     ident_parser(true).and_then(move |ident| {
-        if ident.str() == keyword {
-            Parser::new_ok(ident.0.map(|_| keyword))
+        if &*ident.as_str() == keyword {
+            Parser::new_ok(ident.0.add_value(keyword))
         } else {
-            let str = ident.str().to_string();
-            Parser::new_err(ident.0.map(|_| Error::InvalidKeyword(str)))
+            let str = ident.as_str().to_string();
+            Parser::new_err(ident.0.add_value(Error::InvalidKeyword(str)))
         }
     })
 }
-pub fn keywords_parser(keywords: &'static [&'static str]) -> Parser<Span<&'static str>> {
+pub fn keywords_parser(keywords: &'static [&'static str]) -> Parser<SpanOf<&'static str>> {
     ident_parser(true).and_then(move |ident| {
-        if let Some(&keyword) = keywords.into_iter().find(|&&k| k == ident.str()) {
-            Parser::new_ok(ident.0.map(|_| keyword))
+        if let Some(&keyword) = keywords.into_iter().find(|&&k| k == &*ident.as_str()) {
+            Parser::new_ok(ident.0.add_value(keyword))
         } else {
-            let str = ident.str().to_string();
-            Parser::new_err(ident.0.map(|_| Error::InvalidKeyword(str)))
+            let str = ident.as_str().to_string();
+            Parser::new_err(ident.0.add_value(Error::InvalidKeyword(str)))
         }
     })
 }
 fn statements_parser() -> Parser<Statements> {
     // Series of keywords that indicate the end of current statements scope
     const TERMINATORS: &[&str] = &["end", "else", "elif", "onbreak", "oncontinue"];
-    fn seperator_parser() -> Parser<Span<&'static str>> {
+    fn seperator_parser() -> Parser<SpanOf<&'static str>> {
         skip_parser(false).and_then(|_| strings_eq_parser(&[";", "\n", "\r\n"]))
     }
     fn stmt_parser() -> Parser<Statement> {
         skip_parser(true).and_then(|_| {
             keywords_parser(TERMINATORS).then_or(
-                |_| Parser::new_err(Span::new(0, 0, Error::Eof)),
+                |_| Parser::new_err_current(Error::Eof),
                 |_| statement_parser(),
             )
         })
@@ -297,7 +297,10 @@ mod tests {
 .$((b)())
 .$((c)())
 $end";
-        let result = statement_parser().parse(Scanner::new(test.chars())).unwrap().1;
+        let result = statement_parser()
+            .parse(Scanner::new(test.chars()))
+            .unwrap()
+            .1;
         assert_eq!(result.to_string(), answer);
     }
 }
