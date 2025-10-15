@@ -12,7 +12,6 @@ use crate::{
 };
 use std::fmt;
 use std::fmt::Formatter;
-use std::rc::Rc;
 
 #[derive(Clone)]
 pub enum Statement {
@@ -27,7 +26,7 @@ impl fmt::Display for Statement {
             Self::Expression(expr) => write!(f, "$({})", expr),
             Self::If(ifstmt) => write!(f, "{}", ifstmt),
             Self::While(whilestmt) => write!(f, "{}", whilestmt),
-            Self::Block(block) => write!(f, "do\n{}\nend", block.to_string_indent()),
+            Self::Block(block) => write!(f, "$do\n{}\n$end", block.to_string_indent()),
         }
     }
 }
@@ -92,7 +91,7 @@ impl fmt::Display for IfStmt {
         match &self.else_block {
             Some(ElseBlock::Elif(if_stmt)) => write!(
                 f,
-                "$elif {} then{}\n",
+                "$elif {} do{}\n",
                 if_stmt.condition,
                 if_stmt.then_block.to_string_indent()
             )?,
@@ -140,6 +139,11 @@ fn statements_parser() -> Parser<Statements> {
     fn seperator_parser() -> Parser<SpanOf<&'static str>> {
         skip_parser(false).and_then(|_| strings_eq_parser(&[";", "\n", "\r\n"]))
     }
+    fn seperators_parser() -> Parser<()> {
+        seperator_parser()
+            .map(|_| ())
+            .fold(seperator_parser, |_, _| ())
+    }
     fn stmt_parser() -> Parser<Statement> {
         skip_parser(true).and_then(|_| {
             keywords_parser(TERMINATORS).then_or(
@@ -148,13 +152,12 @@ fn statements_parser() -> Parser<Statements> {
             )
         })
     }
-    skip_parser(true)
-        .map(|_| vec![])
+    Parser::new_ok(vec![])
         .fold(
             || {
                 stmt_parser()
                     .optional()
-                    .and_then(|stmt| seperator_parser().map(move |_| stmt))
+                    .and_then(|stmt| seperators_parser().map(move |_| stmt))
             },
             |mut stmts, stmt| {
                 if let Some(stmt) = stmt {
@@ -163,16 +166,15 @@ fn statements_parser() -> Parser<Statements> {
                 stmts
             },
         )
-        .and_then(|stmts| {
-            stmt_parser()
-                .map({
-                    let mut stmts = stmts.clone();
-                    move |stmt| {
+        .and_then(|mut stmts| {
+            stmt_parser().optional().map({
+                move |stmt| {
+                    if let Some(stmt) = stmt {
                         stmts.push(stmt);
-                        stmts
                     }
-                })
-                .or_else(move |_| Parser::new_ok(stmts))
+                    stmts
+                }
+            })
         })
         .map(Statements)
 }
@@ -182,51 +184,36 @@ fn do_block_parser() -> Parser<Statements> {
         .and_then(|stmts| keyword_parser("end").map(move |_| stmts))
 }
 fn if_stmt_parser() -> Parser<IfStmt> {
-    // This one ignores the starting if keyword
-    // and allows to recursively join in elif case
-    fn _if_stmt_parser() -> Parser<IfStmt> {
-        multiline_expression_parser()
+    fn _if_parser(initial_keyword: &'static str) -> Parser<IfStmt> {
+        keyword_parser(initial_keyword)
+            .and_then(|_| inline_expression_parser())
             .and_then(|condition| keyword_parser("do").map(move |_| condition))
-            .and_then(|condition| statements_parser().map(move |stmts| (condition, stmts)))
-            .map(|(condition, stmts)| (Rc::new(condition), Rc::new(stmts)))
-            .and_then(|(condition, stmts)| {
+            .and_then(|condition| {
+                statements_parser().map(move |then_block| (condition, then_block))
+            })
+            .and_then(|(condition, then_block)| {
                 keyword_parser("end")
-                    .map({
-                        let condition = condition.clone();
-                        let stmts = stmts.clone();
-                        move |_| IfStmt {
-                            condition: (*condition).clone(),
-                            then_block: (*stmts).clone(),
-                            else_block: None,
-                        }
+                    .map(|_| None)
+                    .or_else(|_| {
+                        else_parser().map(move |else_block| Some(ElseBlock::Else(else_block)))
                     })
-                    .or_else({
-                        let condition = condition.clone();
-                        let stmts = stmts.clone();
-                        move |_| {
-                            keyword_parser("else")
-                                .and_then(|_| statements_parser())
-                                .and_then(|else_stmts| {
-                                    keyword_parser("end").map(move |_| IfStmt {
-                                        condition: (*condition).clone(),
-                                        then_block: (*stmts).clone(),
-                                        else_block: Some(ElseBlock::Else(else_stmts)),
-                                    })
-                                })
-                        }
+                    .or_else(|_| {
+                        _if_parser("elif")
+                            .map(move |elif_stmt| Some(ElseBlock::Elif(elif_stmt.into())))
                     })
-                    .or_else(move |_| {
-                        keyword_parser("elif").and_then(move |_| {
-                            _if_stmt_parser().map(move |ifstmt| IfStmt {
-                                condition: (*condition).clone(),
-                                then_block: (*stmts).clone(),
-                                else_block: Some(ElseBlock::Elif(ifstmt.into())),
-                            })
-                        })
+                    .map(move |else_block| IfStmt {
+                        condition,
+                        then_block,
+                        else_block,
                     })
             })
     }
-    keyword_parser("if").and_then(|_| _if_stmt_parser())
+    fn else_parser() -> Parser<Statements> {
+        keyword_parser("else")
+            .and_then(|_| statements_parser())
+            .and_then(|stmts| keyword_parser("end").map(move |_| stmts))
+    }
+    _if_parser("if")
 }
 fn while_stmt_parser() -> Parser<WhileStmt> {
     fn onbreak_parser() -> Parser<Statements> {
@@ -288,14 +275,24 @@ mod tests {
         ;
         ;
 
-
-
+    while a < 10 do
+        a += 1
+       oncontinue
+    onbreak
+        print(a)
+        end
         end
         ";
         let answer = r"$if (a)<(b) do
 .$((a)())
 .$((b)())
 .$((c)())
+.$while (a)<(10) do
+..$((a)+=(1))
+.$onbreak
+..$((print)(a))
+.$oncontinue
+.$end
 $end";
         let result = statement_parser()
             .parse(Scanner::new(test.chars()))
