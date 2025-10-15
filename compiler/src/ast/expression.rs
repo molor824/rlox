@@ -41,7 +41,7 @@ impl fmt::Display for Number {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Expression {
     Ident(Ident),
     CharLit(SpanOf<char>),

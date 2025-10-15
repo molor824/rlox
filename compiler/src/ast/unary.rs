@@ -30,7 +30,7 @@ impl fmt::Display for PrefixOperator {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PrefixUnary {
     pub operator: SpanOf<PrefixOperator>,
     pub operand: Box<Expression>,
@@ -41,7 +41,7 @@ impl fmt::Display for PrefixUnary {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PostfixOperator {
     Call(Vec<Expression>),
     Property(Ident),
@@ -63,7 +63,7 @@ impl fmt::Display for PostfixOperator {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PostfixUnary {
     pub operator: SpanOf<PostfixOperator>,
     pub operand: Box<Expression>,

@@ -6,7 +6,7 @@ use super::{
     expression::Expression, primary::symbols_parser, unary::unary_expression_parser, Parser,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Binary {
     pub left: Box<Expression>,
     pub right: Box<Expression>,

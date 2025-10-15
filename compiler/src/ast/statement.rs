@@ -13,7 +13,6 @@ use crate::{
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Clone)]
 pub enum Statement {
     Expression(Expression),
     If(IfStmt),
@@ -30,7 +29,6 @@ impl fmt::Display for Statement {
         }
     }
 }
-#[derive(Clone)]
 pub struct Statements(pub Vec<Statement>);
 impl fmt::Display for Statements {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -45,7 +43,6 @@ impl Statements {
         self.to_string().replace('\n', "\n.")
     }
 }
-#[derive(Clone)]
 pub struct WhileStmt {
     pub condition: Expression,
     pub while_block: Statements,
@@ -69,12 +66,10 @@ impl fmt::Display for WhileStmt {
         write!(f, "$end")
     }
 }
-#[derive(Clone)]
 pub enum ElseBlock {
     Elif(Box<IfStmt>),
     Else(Statements),
 }
-#[derive(Clone)]
 pub struct IfStmt {
     pub condition: Expression,
     pub then_block: Statements,
