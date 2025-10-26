@@ -12,7 +12,7 @@ pub fn primary_parser(skip_newline: bool) -> Parser<Expression> {
         .or_else(move |_| ident_parser(skip_newline).map(Expression::Ident))
         .or_else(move |_| group_parser(skip_newline))
         .or_else(move |_| array_parser(skip_newline))
-        .map_err(|err| err.map(|_| Error::NoExpression))
+        .or_else(|_| Parser::new_err_current(Error::NoExpression))
 }
 
 fn group_parser(skip_newline: bool) -> Parser<Expression> {
@@ -80,7 +80,9 @@ mod tests {
             "(1)+((2)+((3)*((4)+(5))))",
         ];
         for (test, answer) in tests.into_iter().zip(answers) {
-            let (_, result) = primary_parser(false).parse(Scanner::new(test.chars())).unwrap();
+            let (_, result) = primary_parser(false)
+                .parse(Scanner::new(test.chars()))
+                .unwrap();
             assert_eq!(result.to_string(), answer);
         }
     }

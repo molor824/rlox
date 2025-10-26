@@ -181,7 +181,10 @@ fn product_parser(skip_newline: bool) -> Parser<Expression> {
         move || operator_parser(skip_newline, &["*", "/", "%"]),
     )
 }
-fn operator_parser(skip_newline: bool, strings: &'static [&'static str]) -> Parser<SpanOf<Operator>> {
+fn operator_parser(
+    skip_newline: bool,
+    strings: &'static [&'static str],
+) -> Parser<SpanOf<Operator>> {
     symbols_parser(skip_newline, strings).map(|i| i.map(|i| Operator::try_from_str(i).unwrap()))
 }
 fn l_binary_parser(

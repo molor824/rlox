@@ -22,9 +22,13 @@ impl Scanner {
             let Some(ch) = self.iter.borrow_mut().next() else {
                 break;
             };
-                self.source.borrow_mut().push(ch);
+            self.source.borrow_mut().push(ch);
         }
-        let ch = self.source.borrow_mut().get(self.offset..).and_then(|s| s.chars().next());
+        let ch = self
+            .source
+            .borrow_mut()
+            .get(self.offset..)
+            .and_then(|s| s.chars().next());
         ch.map(|ch| {
             let offset = self.offset;
             self.offset += ch.len_utf8();
