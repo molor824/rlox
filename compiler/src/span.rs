@@ -9,9 +9,6 @@ pub struct Span {
     pub source: Rc<RefCell<String>>,
 }
 impl Span {
-    pub const fn new(source: Rc<RefCell<String>>, range: Range<usize>) -> Self {
-        Self { range, source }
-    }
     pub fn as_slice<'a>(&'a self) -> Ref<'a, str> {
         Ref::map(self.source.borrow(), |s| &s[self.range.clone()])
     }
@@ -29,9 +26,6 @@ impl Span {
             source: self.source,
         }
     }
-    pub fn add_value<T>(self, value: T) -> SpanOf<T> {
-        SpanOf { span: self, value }
-    }
 }
 impl Debug for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -39,40 +33,16 @@ impl Debug for Span {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpanOf<T> {
-    pub span: Span,
-    pub value: T,
-}
+#[derive(Clone, PartialEq, Eq)]
+pub struct SpanOf<T>(pub Span, pub T);
 impl<T> SpanOf<T> {
-    pub const fn new(source: Rc<RefCell<String>>, range: Range<usize>, value: T) -> Self {
-        Self {
-            span: Span::new(source, range),
-            value,
-        }
-    }
     pub const fn start(&self) -> usize {
-        self.span.start()
+        self.0.start()
     }
     pub const fn end(&self) -> usize {
-        self.span.end()
+        self.0.end()
     }
-    pub fn combine<U, O>(self, other: SpanOf<U>, f: impl FnOnce(T, U) -> O) -> SpanOf<O> {
-        SpanOf {
-            span: self.span.concat(other.span),
-            value: f(self.value, other.value),
-        }
-    }
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> SpanOf<U> {
-        SpanOf {
-            span: self.span,
-            value: f(self.value),
-        }
-    }
-    pub fn replace<U>(self, value: U) -> SpanOf<U> {
-        SpanOf {
-            span: self.span,
-            value,
-        }
+    pub fn concat<U, R>(self, other: SpanOf<U>, concat: impl FnOnce(T, U) -> R) -> SpanOf<R> {
+        SpanOf(self.0.concat(other.0), concat(self.1, other.1))
     }
 }
