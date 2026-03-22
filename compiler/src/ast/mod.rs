@@ -2,22 +2,37 @@ use num_bigint::BigUint;
 
 use crate::source::Source;
 
-fn parse_digit(source: &mut Source, radix: u32, underscore: bool) -> Option<u32> {
-    if underscore { // Skip over underscore character is permitted
-        source.next_if(|ch| ch == '_');
-    }
-    source.next_and(|ch| ch.to_digit(radix))
+#[derive(PartialEq, Debug, Clone, thiserror::Error)]
+pub enum Error {
+    #[error("Character {0} is not allowed in number with base {1}")]
+    NotDigit(char, u32),
 }
+
 // Every following digit after the first can have one underscore
-fn parse_integer(source: &mut Source, radix: u32) -> Option<BigUint> {
-    let Some(first_digit) = parse_digit(source, radix, false) else {
-        return None;
+// Every alphanumeric characters consequent after one and other, is considered part of number
+// If that said alphanumeric character is non-digit, then return an error
+fn parse_digit(source: &mut Source, radix: u32) -> Result<Option<u32>, Error> {
+    let Some(ch) = source.next_if(|ch| ch.is_alphanumeric()) else {
+        return Ok(None);
+    };
+    let Some(digit) = ch.to_digit(radix) else {
+        return Err(Error::NotDigit(ch, radix));
+    };
+    Ok(Some(digit))
+}
+fn parse_integer(source: &mut Source, radix: u32) -> Result<Option<BigUint>, Error> {
+    let Some(first_digit) = parse_digit(source, radix)? else {
+        return Ok(None);
     };
     let mut number = BigUint::from(first_digit);
-    while let Some(digit) = parse_digit(source, radix, true) {
+    loop {
+        source.next_if(|ch| ch == '_');
+        let Some(digit) = parse_digit(source, radix)? else {
+            break;
+        };
         number = number * radix + digit;
     }
-    Some(number)
+    Ok(Some(number))
 }
 
 #[cfg(test)]
@@ -31,6 +46,6 @@ mod tests {
     #[test]
     fn integer_parsing() {
         let mut source = Source::new(Rc::new(RefCell::new("4_15_4".chars())));
-        assert_eq!(parse_integer(&mut source, 10), Some(BigUint::from(4154_u32)));
+        assert_eq!(parse_integer(&mut source, 10), Ok(Some(BigUint::from(4154_u32))));
     }
 }

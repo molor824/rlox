@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 compiler = { path = "./compiler" }
+thiserror = "2.0.18"
 
 [workspace]
 members = ["compiler"]
