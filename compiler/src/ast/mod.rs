@@ -29,12 +29,33 @@ pub struct Error {
 }
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .field("span", &&self.source.borrow()[self.span.start..self.span.end()])
+            .finish()
     }
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        let mut col = 0;
+        let mut row = 1;
+        let mut prev_ch = '\0';
+        let source = self.source.borrow();
+        for (i, ch) in source.char_indices() {
+            if prev_ch == '\n' || prev_ch == '\r' {
+                col = 1;
+                if prev_ch == '\n' {
+                    row += 1;
+                }
+            } else {
+                col += 1;
+            }
+            if i == self.span.start {
+                return write!(f, "Error [line:{}, col:{}]: {}", row, col, self.kind);
+            }
+            prev_ch = ch;
+        }
+        write!(f, "Error: {}", self.kind)
     }
 }
 
@@ -75,7 +96,7 @@ impl<R: Read> Parser<R> {
     pub fn error_here(&self, kind: ErrorKind) -> Error {
         self.error(Span::new(self.offset, 0), kind)
     }
-    pub fn next_and<T>(&mut self, then: impl FnOnce(SpanOf<char>) -> Option<T>) -> Result<Option<T>> {
+    pub fn next_and<T>(&mut self, then: impl FnOnce((usize, char)) -> Option<T>) -> Result<Option<T>> {
         let prev = self.clone();
         let Some(ch) = self.next()? else {
             return Ok(None);
@@ -86,7 +107,7 @@ impl<R: Read> Parser<R> {
         };
         Ok(Some(v))
     }
-    pub fn next_if(&mut self, condition: impl FnOnce(SpanOf<char>) -> bool) -> Result<Option<SpanOf<char>>> {
+    pub fn next_if(&mut self, condition: impl FnOnce((usize, char)) -> bool) -> Result<Option<(usize, char)>> {
         let prev = self.clone();
         let Some(ch) = self.next()? else {
             return Ok(None);
@@ -97,7 +118,7 @@ impl<R: Read> Parser<R> {
         }
         Ok(Some(ch))
     }
-    pub fn next(&mut self) -> Result<Option<SpanOf<char>>> {
+    pub fn next(&mut self) -> Result<Option<(usize, char)>> {
         let mut buffer = self.buffer.borrow_mut();
         let mut reader = self.reader.borrow_mut();
         loop {
@@ -105,7 +126,7 @@ impl<R: Read> Parser<R> {
                 Some(ch) => {
                     let index = self.offset;
                     self.offset += ch.len_utf8();
-                    return Ok(Some(SpanOf(Span::new(index, ch.len_utf8()), ch)));
+                    return Ok(Some((index, ch)));
                 }
                 None => {
                     if reader.read_line(&mut buffer).map_err(|e| self.error_here(e.into()))? == 0 {
@@ -117,7 +138,7 @@ impl<R: Read> Parser<R> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub len: usize
@@ -136,28 +157,5 @@ impl Span {
         let start = self.start.min(other.start);
         let end = self.end().max(other.end());
         Span::from_end(start, end)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpanOf<T>(pub Span, pub T);
-impl<T> SpanOf<T> {
-    pub const fn start(&self) -> usize {
-        self.0.start
-    }
-    pub const fn len(&self) -> usize {
-        self.0.len
-    }
-    pub const fn end(&self) -> usize {
-        self.0.end()
-    }
-    pub fn map<U>(self, map: impl FnOnce(T) -> U) -> SpanOf<U> {
-        SpanOf(self.0, map(self.1))
-    }
-    pub fn concat<U, R>(self, other: SpanOf<U>, concat: impl FnOnce(T, U) -> R) -> SpanOf<R> {
-        SpanOf(self.0.concat(other.0), concat(self.1, other.1))
-    }
-    pub fn concat_span(self, other: Span) -> Self {
-        Self(self.0.concat(other), self.1)
     }
 }
