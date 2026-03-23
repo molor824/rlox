@@ -68,13 +68,14 @@ impl<R: Read> Parser<R> {
         };
         let mut number = first_digit.map(BigInt::from);
         loop {
+            let prev = self.clone();
             self.next_if(|ch| ch.1 == '_')?;
             let Some(digit) = self.next_digit(radix)? else {
-                break;
+                *self = prev;
+                return Ok(Some(number))
             };
             number = number.concat(digit, |num, d| num * radix + d)
         }
-        Ok(Some(number))
     }
     fn next_integer(&mut self) -> Result<Option<SpanOf<Integer>>> {
         let prev = self.clone();
@@ -92,7 +93,7 @@ impl<R: Read> Parser<R> {
                             .map(|value| Integer { radix, value })
                             .concat_span(prefix),
                     )),
-                    None => Err(self.error(prefix, ErrorKind::IntegerMissing)),
+                    None => Err(self.error(prefix, ErrorKind::MissingInteger)),
                 };
             }
         }
@@ -123,6 +124,50 @@ impl<R: Read> Parser<R> {
         }
         Ok(Some(integer.concat(mantissa, |i, m| {
             Number::new(i.radix, i.value + m, Some(exponent))
+        })))
+    }
+    fn next_exponent_integer(&mut self, radix: u32) -> Result<SpanOf<i64>> {
+        let sign = self.next_if(|ch| matches!(ch.1, '+' | '-'))?;
+        let Some(first_digit) = self.next_digit(radix)? else {
+            return Err(match sign {
+                Some(s) => self.error(s.0, ErrorKind::MissingExponent),
+                None => self.error_here(ErrorKind::MissingExponent),
+            });
+        };
+        let mut integer = first_digit.map(|d| d as i64);
+        loop {
+            let prev = self.clone();
+            self.next_if(|ch| ch.1 == '_')?;
+            let Some(digit) = self.next_digit(radix)? else {
+                *self = prev;
+                break;
+            };
+            integer = integer.concat(digit, |i, d| i * (radix as i64) + (d as i64));
+        }
+        if let Some(SpanOf(_, '-')) = sign {
+            integer.1 = -integer.1;
+        }
+        Ok(integer)
+    }
+    /// Parses full number
+    pub fn next_number(&mut self) -> Result<Option<SpanOf<Number>>> {
+        let Some(real) = self.next_real()? else {
+            return Ok(None);
+        };
+        let Some(_) = self.next_if(|ch| if real.1.radix > 10 {
+            matches!(ch.1, 'p' | 'P')
+        } else {
+            matches!(ch.1, 'e' | 'E')
+        })? else {
+            return Ok(Some(real));
+        };
+        let exponent = self.next_exponent_integer(real.1.radix).map_err(|mut e| {
+            e.span = e.span.concat(real.0.clone());
+            e
+        })?;
+        Ok(Some(real.concat(exponent, |mut r, e| {
+            r.exponent = Some(r.exponent.unwrap_or(0) + e);
+            r
         })))
     }
 }
@@ -179,6 +224,29 @@ mod tests {
                 parser.next_real().unwrap().unwrap().1,
                 Number::new(a.0, a.1.into(), a.2)
             );
+        }
+    }
+    #[test]
+    fn num_parsing() {
+        let qna = [
+            ("123", (10_u32, 123_i64, None)),
+            ("123.", (10, 123, Some(0))),
+            ("1.230", (10, 123, Some(-2))),
+            ("0xdead_BEEF", (16, 0xdeadbeef, None)),
+            ("0x10.1", (16, 0x101, Some(-1))),
+            ("0o100.40", (8, 0o1004, Some(-1))),
+            ("1e10", (10, 1, Some(10))),
+            ("34.3e-3", (10, 343, Some(-4))),
+            ("0b0.1e+101001", (2, 0b1, Some(0b101001 - 1))),
+            ("0xD.eadPBeeF", (16, 0xdead, Some(0xbeef - 3))),
+            ("0x1pdeadbeef", (16, 1, Some(0xdeadbeef_i64))),
+        ];
+        for (q, a) in qna {
+            let mut parser = Parser::new(q.as_bytes());
+            assert_eq!(
+                parser.next_number().unwrap().unwrap().1,
+                Number::new(a.0, a.1.into(), a.2)
+            )
         }
     }
 }

@@ -16,7 +16,9 @@ pub enum ErrorKind {
     #[error("Character {0} is not allowed in number with base {1}")]
     NotDigit(char, u32),
     #[error("Missing integer")]
-    IntegerMissing,
+    MissingInteger,
+    #[error("Missing exponent")]
+    MissingExponent,
 }
 #[derive(thiserror::Error)]
 pub struct Error {
