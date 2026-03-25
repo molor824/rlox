@@ -221,6 +221,135 @@ impl<R: Read> Parser<R> {
         }
         Ok(Some(Ident(Span::from_end(start, end), self.buffer.clone())))
     }
+    fn next_sequence(&mut self, sequence: &str) -> Result<Option<Span>> {
+        let prev = self.clone();
+        let mut start = None;
+        for ch in sequence.chars() {
+            match self.next_if(|ch1| ch1.1 == ch)? {
+                Some(ch) => {
+                    let span = start.unwrap_or(Span::from_char_offset(ch));
+                    start = Some(span.concat(Span::from_char_offset(ch)));
+                }
+                None => {
+                    *self = prev;
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(start)
+    }
+    fn next_char(&mut self, raw: bool) -> Result<Option<(Span, char)>> {
+        let next_hex_digits = |parser: &mut Self, count: usize| -> Result<Option<(Span, u32)>> {
+            let mut number = None;
+            for _ in 0..count {
+                let Some(digit) = parser.next_and(|ch| match ch.1.to_digit(16) {
+                    Some(hex) => Some((ch.0, hex)),
+                    None => None
+                })? else {
+                    return Ok(None);
+                };
+                let span = Span::new(digit.0, 1);
+                let num = number.unwrap_or((span, 0_u32));
+                number = Some((num.0.concat(span), num.1 * 16 + digit.1));
+            }
+            Ok(number)
+        };
+        let Some(ch) = self.next()? else {
+            return Ok(None);
+        };
+        match ch.1 {
+            '\\' if !raw => {
+                let escape = self.next()?.ok_or(self.error(Span::from_char_offset(ch), ErrorKind::InvalidEscape))?;
+                let span = Span::from_end(ch.0, escape.0 + escape.1.len_utf8());
+                Ok(Some(match escape.1 {
+                    'a' => (span, '\x07'),
+                    'b' => (span, '\x08'),
+                    'n' => (span, '\n'),
+                    't' => (span, '\t'),
+                    'r' => (span, '\r'),
+                    'f' => (span, '\x0c'),
+                    '\'' => (span, '\''),
+                    '"' => (span, '"'),
+                    '\\' => (span, '\\'),
+                    '0' => (span, '\0'),
+                    'x' | 'u' | 'U' => {
+                        let Some(hex_digits) = next_hex_digits(self, match escape.1 {
+                            'x' => 2,
+                            'u' => 4,
+                            _ => 8,
+                        })? else {
+                            return Err(self.error(span, ErrorKind::InvalidEscape));
+                        };
+                        let Some(ch) = char::from_u32(hex_digits.1) else {
+                            return Err(self.error(hex_digits.0, ErrorKind::InvalidUnicode));
+                        };
+                        (span.concat(hex_digits.0), ch)
+                    }
+                    _ => return Err(self.error(span, ErrorKind::InvalidEscape))
+                }))
+            }
+            _ => Ok(Some((Span::from_char_offset(ch), ch.1)))
+        }
+    }
+    pub fn next_literal_string(&mut self) -> Result<Option<(Span, String)>> {
+        let prev = self.clone();
+        let raw_start = self.next_if(|ch| ch.1 == 'r')?;
+        let depth = match raw_start {
+            Some(_) => {
+                let mut depth: Option<(Span, usize)> = None;
+                while let Some(ch) = self.next_if(|ch| ch.1 == '(')? {
+                    let span = Span::from_char_offset(ch);
+                    depth = Some(match depth {
+                        Some(d) => (d.0.concat(span), d.1 + 1),
+                        None => (span, 1)
+                    });
+                }
+                depth
+            }
+            None => None,
+        };
+        let Some(quote_start) = self.next_if(|ch| matches!(ch.1, '\'' | '"'))? else {
+            *self = prev;
+            return Ok(None);
+        };
+        let mut span = Span::from_char_offset(quote_start);
+        let mut string = String::new();
+        if let Some(ch) = raw_start {
+            span = span.concat(Span::from_char_offset(ch));
+        }
+
+        loop {
+            let prev = self.clone();
+            if let Some(end_quote) = self.next_if(|ch| ch.1 == quote_start.1)? {
+                let mut span1 = Span::from_char_offset(end_quote);
+                let mut satisfies = true;
+                match depth {
+                    Some(depth) => {
+                        for _ in 0..depth.1 {
+                            let Some(bracket) = self.next_if(|ch| ch.1 == ')')? else {
+                                satisfies = false;
+                                break;
+                            };
+                            span1 = span1.concat(Span::from_char_offset(bracket));
+                        }
+                    },
+                    None => {}
+                }
+                if satisfies {
+                    span = span.concat(span1);
+                    break;
+                }
+            }
+            *self = prev;
+            let Some(ch) = self.next_char(raw_start.is_some())? else {
+                return Err(self.error(span, ErrorKind::UnterminatedString));
+            };
+            span = span.concat(ch.0);
+            string.push(ch.1);
+        }
+
+        Ok(Some((span, string)))
+    }
 }
 
 #[cfg(test)]
@@ -257,6 +386,27 @@ mod tests {
             let mut parser = Parser::new(q.as_bytes());
             let result = parser.next_ident().unwrap().unwrap();
             assert_eq!(result.to_string(), q);
+        }
+    }
+    #[test]
+    fn string_parsing() {
+        let qna = [
+            (r#""test""#, "test"),
+            (r#"'escape\n'"#, "escape\n"),
+            (r#"'escape\''"#, "escape'"),
+            ("\'new\nline\'", "new\nline"),
+            (r#""w is \x77""#, "w is w"),
+            (r#""Superman once said \"Thou shalt not pass\"""#, "Superman once said \"Thou shalt not pass\""),
+            (r#""\u4f60\u597d""#, "你好"),
+            (r#"'你好'"#, "\u{4f60}\u{597d}"),
+            (r#"r"raw string\""#, r"raw string\"),
+            (r#"r('raw string with 'quotes'')"#, r"raw string with 'quotes'"),
+            (r#"r(("raw string with ("quotes and brackets")"))"#, r#"raw string with ("quotes and brackets")"#)
+        ];
+        for (q, a) in qna {
+            let mut parser = Parser::new(q.as_bytes());
+            let result = parser.next_literal_string().unwrap().unwrap().1;
+            assert_eq!(result, a);
         }
     }
 }

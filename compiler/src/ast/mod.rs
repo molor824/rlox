@@ -19,6 +19,12 @@ pub enum ErrorKind {
     MissingInteger,
     #[error("Missing exponent")]
     MissingExponent,
+    #[error("Invalid escape sequence")]
+    InvalidEscape,
+    #[error("Invalid unicode")]
+    InvalidUnicode,
+    #[error("String literal unterminated")]
+    UnterminatedString
 }
 #[derive(thiserror::Error)]
 pub struct Error {
@@ -147,11 +153,17 @@ impl Span {
     pub const fn new(start: usize, len: usize) -> Self {
         Self { start, len }
     }
+    pub const fn from_char_offset(ch: (usize, char)) -> Self {
+        Self { start: ch.0, len: ch.1.len_utf8() }
+    }
     pub const fn from_end(start: usize, end: usize) -> Self {
         Self { start, len: end - start }
     }
     pub const fn end(&self) -> usize {
         self.start + self.len
+    }
+    pub fn with_end(self, new_end: usize) -> Self {
+        Self::from_end(self.start, new_end)
     }
     pub fn concat(self, other: Span) -> Span {
         let start = self.start.min(other.start);
