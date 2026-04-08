@@ -1,3 +1,5 @@
+use std::cell::Ref;
+
 use num_bigint::BigInt;
 
 use crate::ast::*;
@@ -39,16 +41,24 @@ impl Number {
     }
 }
 #[derive(Clone)]
-pub struct Ident(pub Span, pub Rc<RefCell<String>>);
-impl fmt::Debug for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", &self.1.borrow()[self.0.start..self.0.end()])
+pub struct CachedString {
+    pub span: Span,
+    pub id: usize,
+    pub cache: Rc<RefCell<Cache<String>>>,
+}
+impl CachedString {
+    pub fn get_str<'a>(&'a self) -> Ref<'a, str> {
+        Ref::map(self.cache.borrow(), |cache| {
+            cache.get_data(self.id).unwrap().as_str()
+        })
     }
 }
-impl fmt::Display for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", &self.1.borrow()[self.0.start..self.0.end()])
-    }
+
+#[derive(Clone)]
+pub enum Primitive {
+    Ident(CachedString),
+    String(CachedString),
+    Number(Number),
 }
 
 impl<R: Read> Parser<R> {
@@ -208,7 +218,7 @@ impl<R: Read> Parser<R> {
             exponent: Some(exponent.1 + real.exponent.unwrap_or(0)),
         }))
     }
-    pub fn next_ident(&mut self) -> Result<Option<Ident>> {
+    pub fn next_ident(&mut self) -> Result<Option<CachedString>> {
         let Some((start, ch)) = self.next_if(|ch| ch.1.is_alphabetic() || ch.1 == '_')? else {
             return Ok(None);
         };
@@ -219,24 +229,14 @@ impl<R: Read> Parser<R> {
         while let Some((current, ch)) = self.next_if(|(_, ch)| ch == '\'')? {
             end = current + ch.len_utf8()
         }
-        Ok(Some(Ident(Span::from_end(start, end), self.buffer.clone())))
-    }
-    fn next_sequence(&mut self, sequence: &str) -> Result<Option<Span>> {
-        let prev = self.clone();
-        let mut start = None;
-        for ch in sequence.chars() {
-            match self.next_if(|ch1| ch1.1 == ch)? {
-                Some(ch) => {
-                    let span = start.unwrap_or(Span::from_char_offset(ch));
-                    start = Some(span.concat(Span::from_char_offset(ch)));
-                }
-                None => {
-                    *self = prev;
-                    return Ok(None);
-                }
-            }
-        }
-        Ok(start)
+        Ok(Some(CachedString {
+            span: Span::from_end(start, end),
+            cache: self.ident_cache.clone(),
+            id: self
+                .ident_cache
+                .borrow_mut()
+                .insert(self.buffer.borrow()[start..end].to_string()),
+        }))
     }
     fn next_char(&mut self, raw: bool) -> Result<Option<(Span, char)>> {
         let next_hex_digits = |parser: &mut Self, count: usize| -> Result<Option<(Span, u32)>> {
@@ -244,8 +244,9 @@ impl<R: Read> Parser<R> {
             for _ in 0..count {
                 let Some(digit) = parser.next_and(|ch| match ch.1.to_digit(16) {
                     Some(hex) => Some((ch.0, hex)),
-                    None => None
-                })? else {
+                    None => None,
+                })?
+                else {
                     return Ok(None);
                 };
                 let span = Span::new(digit.0, 1);
@@ -259,7 +260,9 @@ impl<R: Read> Parser<R> {
         };
         match ch.1 {
             '\\' if !raw => {
-                let escape = self.next()?.ok_or(self.error(Span::from_char_offset(ch), ErrorKind::InvalidEscape))?;
+                let escape = self
+                    .next()?
+                    .ok_or(self.error(Span::from_char_offset(ch), ErrorKind::InvalidEscape))?;
                 let span = Span::from_end(ch.0, escape.0 + escape.1.len_utf8());
                 Ok(Some(match escape.1 {
                     'a' => (span, '\x07'),
@@ -273,11 +276,15 @@ impl<R: Read> Parser<R> {
                     '\\' => (span, '\\'),
                     '0' => (span, '\0'),
                     'x' | 'u' | 'U' => {
-                        let Some(hex_digits) = next_hex_digits(self, match escape.1 {
-                            'x' => 2,
-                            'u' => 4,
-                            _ => 8,
-                        })? else {
+                        let Some(hex_digits) = next_hex_digits(
+                            self,
+                            match escape.1 {
+                                'x' => 2,
+                                'u' => 4,
+                                _ => 8,
+                            },
+                        )?
+                        else {
                             return Err(self.error(span, ErrorKind::InvalidEscape));
                         };
                         let Some(ch) = char::from_u32(hex_digits.1) else {
@@ -285,13 +292,13 @@ impl<R: Read> Parser<R> {
                         };
                         (span.concat(hex_digits.0), ch)
                     }
-                    _ => return Err(self.error(span, ErrorKind::InvalidEscape))
+                    _ => return Err(self.error(span, ErrorKind::InvalidEscape)),
                 }))
             }
-            _ => Ok(Some((Span::from_char_offset(ch), ch.1)))
+            _ => Ok(Some((Span::from_char_offset(ch), ch.1))),
         }
     }
-    pub fn next_literal_string(&mut self) -> Result<Option<(Span, String)>> {
+    pub fn next_literal_string(&mut self) -> Result<Option<CachedString>> {
         let prev = self.clone();
         let raw_start = self.next_if(|ch| ch.1 == 'r')?;
         let depth = match raw_start {
@@ -301,7 +308,7 @@ impl<R: Read> Parser<R> {
                     let span = Span::from_char_offset(ch);
                     depth = Some(match depth {
                         Some(d) => (d.0.concat(span), d.1 + 1),
-                        None => (span, 1)
+                        None => (span, 1),
                     });
                 }
                 depth
@@ -332,7 +339,7 @@ impl<R: Read> Parser<R> {
                             };
                             span1 = span1.concat(Span::from_char_offset(bracket));
                         }
-                    },
+                    }
                     None => {}
                 }
                 if satisfies {
@@ -348,7 +355,22 @@ impl<R: Read> Parser<R> {
             string.push(ch.1);
         }
 
-        Ok(Some((span, string)))
+        Ok(Some(CachedString {
+            span,
+            id: self.string_cache.borrow_mut().insert(string),
+            cache: self.string_cache.clone(),
+        }))
+    }
+    pub fn next_primitive(&mut self) -> Result<Option<Primitive>> {
+        Ok(Some(if let Some(n) = self.next_number()? {
+            Primitive::Number(n)
+        } else if let Some(i) = self.next_ident()? {
+            Primitive::Ident(i)
+        } else if let Some(s) = self.next_literal_string()? {
+            Primitive::String(s)
+        } else {
+            return Ok(None);
+        }))
     }
 }
 
@@ -374,18 +396,19 @@ mod tests {
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
             let result = parser.next_number().unwrap().unwrap();
-            assert_eq!((result.radix, result.integer, result.exponent), (a.0, a.1.into(), a.2));
+            assert_eq!(
+                (result.radix, result.integer, result.exponent),
+                (a.0, a.1.into(), a.2)
+            );
         }
     }
     #[test]
     fn ident_parsing() {
-        let questions = [
-            "___", "_test", "test123", "x", "x'", "x''"
-        ];
+        let questions = ["___", "_test", "test123", "x", "x'", "x''"];
         for q in questions {
             let mut parser = Parser::new(q.as_bytes());
             let result = parser.next_ident().unwrap().unwrap();
-            assert_eq!(result.to_string(), q);
+            assert_eq!(&*result.get_str(), q);
         }
     }
     #[test]
@@ -396,17 +419,26 @@ mod tests {
             (r#"'escape\''"#, "escape'"),
             ("\'new\nline\'", "new\nline"),
             (r#""w is \x77""#, "w is w"),
-            (r#""Superman once said \"Thou shalt not pass\"""#, "Superman once said \"Thou shalt not pass\""),
-            (r#""\u4f60\u597d""#, "你好"),
+            (
+                r#""Superman once said \"Thou shalt not pass\"""#,
+                "Superman once said \"Thou shalt not pass\"",
+            ),
+            (r#""\u4f60\U0000597d""#, "你好"),
             (r#"'你好'"#, "\u{4f60}\u{597d}"),
             (r#"r"raw string\""#, r"raw string\"),
-            (r#"r('raw string with 'quotes'')"#, r"raw string with 'quotes'"),
-            (r#"r(("raw string with ("quotes and brackets")"))"#, r#"raw string with ("quotes and brackets")"#)
+            (
+                r#"r('raw string with 'quotes'')"#,
+                r"raw string with 'quotes'",
+            ),
+            (
+                r#"r(("raw string with ("quotes and brackets")"))"#,
+                r#"raw string with ("quotes and brackets")"#,
+            ),
         ];
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_literal_string().unwrap().unwrap().1;
-            assert_eq!(result, a);
+            let result = parser.next_literal_string().unwrap().unwrap();
+            assert_eq!(&*result.get_str(), a);
         }
     }
 }

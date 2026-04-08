@@ -1,4 +1,4 @@
-pub mod primary;
+pub mod primitive;
 
 use std::{
     cell::RefCell,
@@ -6,6 +6,8 @@ use std::{
     io::{self, BufRead, BufReader, Read},
     rc::Rc,
 };
+
+use crate::cache::Cache;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -73,6 +75,8 @@ impl fmt::Display for Error {
 pub struct Parser<R: ?Sized> {
     pub reader: Rc<RefCell<BufReader<R>>>,
     pub buffer: Rc<RefCell<String>>,
+    pub ident_cache: Rc<RefCell<Cache<String>>>,
+    pub string_cache: Rc<RefCell<Cache<String>>>,
     pub offset: usize,
 }
 impl<R> Clone for Parser<R> {
@@ -80,6 +84,8 @@ impl<R> Clone for Parser<R> {
         Self {
             reader: self.reader.clone(),
             buffer: self.buffer.clone(),
+            ident_cache: self.ident_cache.clone(),
+            string_cache: self.string_cache.clone(),
             offset: self.offset,
         }
     }
@@ -89,6 +95,8 @@ impl<R: Read> Parser<R> {
         Self {
             reader: Rc::new(RefCell::new(BufReader::new(reader))),
             buffer: Rc::new(RefCell::new(String::new())),
+            ident_cache: Rc::new(RefCell::new(Cache::new())),
+            string_cache: Rc::new(RefCell::new(Cache::new())),
             offset: 0,
         }
     }
