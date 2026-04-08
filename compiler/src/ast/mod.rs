@@ -110,7 +110,7 @@ impl<R: Read> Parser<R> {
     pub fn error_here(&self, kind: ErrorKind) -> Error {
         self.error(Span::new(self.offset, 0), kind)
     }
-    pub fn next_and<T>(&mut self, then: impl FnOnce((usize, char)) -> Option<T>) -> Result<Option<T>> {
+    pub fn next_and<T>(&mut self, then: impl FnOnce(SpanOf<char>) -> Option<T>) -> Result<Option<T>> {
         let prev = self.clone();
         let Some(ch) = self.next()? else {
             return Ok(None);
@@ -121,7 +121,7 @@ impl<R: Read> Parser<R> {
         };
         Ok(Some(v))
     }
-    pub fn next_if(&mut self, condition: impl FnOnce((usize, char)) -> bool) -> Result<Option<(usize, char)>> {
+    pub fn next_if(&mut self, condition: impl FnOnce(SpanOf<char>) -> bool) -> Result<Option<SpanOf<char>>> {
         let prev = self.clone();
         let Some(ch) = self.next()? else {
             return Ok(None);
@@ -132,7 +132,7 @@ impl<R: Read> Parser<R> {
         }
         Ok(Some(ch))
     }
-    pub fn next(&mut self) -> Result<Option<(usize, char)>> {
+    pub fn next(&mut self) -> Result<Option<SpanOf<char>>> {
         let mut buffer = self.buffer.borrow_mut();
         let mut reader = self.reader.borrow_mut();
         loop {
@@ -140,7 +140,7 @@ impl<R: Read> Parser<R> {
                 Some(ch) => {
                     let index = self.offset;
                     self.offset += ch.len_utf8();
-                    return Ok(Some((index, ch)));
+                    return Ok(Some(SpanOf(Span::new(index, ch.len_utf8()), ch)));
                 }
                 None => {
                     if reader.read_line(&mut buffer).map_err(|e| self.error_here(e.into()))? == 0 {
@@ -177,5 +177,15 @@ impl Span {
         let start = self.start.min(other.start);
         let end = self.end().max(other.end());
         Span::from_end(start, end)
+    }
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct SpanOf<T>(pub Span, pub T);
+impl<T> SpanOf<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> SpanOf<U> {
+        SpanOf(self.0, f(self.1))
+    }
+    pub fn concat<U, Q>(self, other: SpanOf<U>, f: impl FnOnce(T, U) -> Q) -> SpanOf<Q> {
+        SpanOf(self.0.concat(other.0), f(self.1, other.1))
     }
 }

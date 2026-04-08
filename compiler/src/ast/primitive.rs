@@ -6,20 +6,18 @@ use crate::ast::*;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Integer {
-    pub span: Span,
     pub radix: u32,
     pub integer: BigInt,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Number {
-    pub span: Span,
     pub radix: u32,
     pub integer: BigInt,
     pub exponent: Option<i64>,
 }
 impl Number {
-    pub fn new(span: Span, radix: u32, mut integer: BigInt, mut exponent: Option<i64>) -> Self {
+    pub fn new(radix: u32, mut integer: BigInt, mut exponent: Option<i64>) -> Self {
         if let Some(mut exp) = exponent {
             // Perform zero trimming exponent optimization
             if integer == BigInt::ZERO {
@@ -33,7 +31,6 @@ impl Number {
             exponent = Some(exp);
         }
         Self {
-            span,
             radix,
             integer,
             exponent,
@@ -42,7 +39,6 @@ impl Number {
 }
 #[derive(Clone)]
 pub struct CachedString {
-    pub span: Span,
     pub id: usize,
     pub cache: Rc<RefCell<Cache<String>>>,
 }
@@ -66,8 +62,8 @@ impl<R: Read> Parser<R> {
     // Every alphanumeric characters consequent after one and other, is considered part of number
     // If alphanumeric character is non-digit, then return an error
     // with the exception of 'p' and 'P' characters, as these are used for exponents
-    fn next_digit(&mut self, radix: u32) -> Result<Option<(usize, u32)>> {
-        let Some((start, ch)) = self.next_if(|ch| {
+    fn next_digit(&mut self, radix: u32) -> Result<Option<SpanOf<u32>>> {
+        let Some(digit_ch) = self.next_if(|ch| {
             if radix <= 10 {
                 ch.1.is_ascii_digit()
             } else {
@@ -77,20 +73,17 @@ impl<R: Read> Parser<R> {
         else {
             return Ok(None);
         };
-        let Some(digit) = ch.to_digit(radix) else {
-            return Err(self.error(
-                Span::new(start, ch.len_utf8()),
-                ErrorKind::NotDigit(ch, radix),
-            ));
+        let Some(digit) = digit_ch.1.to_digit(radix) else {
+            return Err(self.error(digit_ch.0, ErrorKind::NotDigit(digit_ch.1, radix)));
         };
-        Ok(Some((start, digit)))
+        Ok(Some(SpanOf(digit_ch.0, digit)))
     }
     /// Parses partial integer. More specifically, it parses integer without the prefix part, sending the radix as a parameter
-    fn next_partial_integer(&mut self, radix: u32) -> Result<Option<(Span, BigInt)>> {
+    fn next_partial_integer(&mut self, radix: u32) -> Result<Option<SpanOf<BigInt>>> {
         let Some(first_digit) = self.next_digit(radix)? else {
             return Ok(None);
         };
-        let mut number = (Span::new(first_digit.0, 1), BigInt::from(first_digit.1));
+        let mut number = first_digit.map(BigInt::from);
         loop {
             let prev = self.clone();
             self.next_if(|ch| ch.1 == '_')?;
@@ -98,58 +91,47 @@ impl<R: Read> Parser<R> {
                 *self = prev;
                 return Ok(Some(number));
             };
-            number.1 = number.1 * radix + digit.1;
-            number.0 = number.0.concat(Span::new(digit.0, 1));
+            number = number.concat(digit, |n, d| n * radix + d);
         }
     }
-    fn next_integer(&mut self) -> Result<Option<Integer>> {
+    fn next_integer(&mut self) -> Result<Option<SpanOf<Integer>>> {
         let prev = self.clone();
-        if let Some((start, _)) = self.next_if(|ch| ch.1 == '0')? {
+        if let Some(start) = self.next_if(|ch| ch.1 == '0')? {
             if let Some(radix) = self.next_and(|ch| match ch.1 {
                 'x' | 'X' => Some(16_u32),
                 'o' | 'O' => Some(8),
                 'b' | 'B' => Some(2),
                 _ => None,
             })? {
-                let prefix = Span::new(start, 2);
+                let prefix = SpanOf(start.0, radix);
                 return match self.next_partial_integer(radix)? {
-                    Some((span, integer)) => Ok(Some(Integer {
-                        radix,
-                        span: prefix.concat(span),
-                        integer,
-                    })),
-                    None => Err(self.error(prefix, ErrorKind::MissingInteger)),
+                    Some(integer) => {
+                        Ok(Some(integer.concat(prefix, |integer, radix| Integer {
+                            radix,
+                            integer,
+                        })))
+                    }
+                    None => Err(self.error(start.0, ErrorKind::MissingInteger)),
                 };
             }
         }
         *self = prev;
-        self.next_partial_integer(10).map(|i| {
-            i.map(|(span, integer)| Integer {
-                span,
-                integer,
-                radix: 10,
-            })
-        })
+        self.next_partial_integer(10)
+            .map(|i| i.map(|i| i.map(|integer| Integer { integer, radix: 10 })))
     }
-    fn next_real(&mut self) -> Result<Option<Number>> {
+    fn next_real(&mut self) -> Result<Option<SpanOf<Number>>> {
         let Some(mut integer) = self.next_integer()? else {
             return Ok(None);
         };
         let Some(dot) = self.next_if(|ch| ch.1 == '.')? else {
-            return Ok(Some(Number {
-                span: integer.span,
-                radix: integer.radix,
-                integer: integer.integer,
-                exponent: None,
-            }));
+            return Ok(Some(
+                integer.map(|integer| Number::new(integer.radix, integer.integer, None)),
+            ));
         };
-        let Some(mantissa) = self.next_partial_integer(integer.radix)? else {
-            return Ok(Some(Number {
-                span: integer.span.concat(Span::new(dot.0, 1)),
-                radix: integer.radix,
-                integer: integer.integer,
-                exponent: Some(0),
-            }));
+        let Some(mantissa) = self.next_partial_integer(integer.1.radix)? else {
+            return Ok(Some(
+                integer.concat(dot, |i, _| Number::new(i.radix, i.integer, Some(0))),
+            ));
         };
         let mantissa_slice = &self.buffer.borrow()[mantissa.0.start..mantissa.0.end()];
         let mut exponent: i64 = 0;
@@ -157,26 +139,22 @@ impl<R: Read> Parser<R> {
             if ch == '_' {
                 continue;
             }
-            integer.integer *= integer.radix;
+            integer.1.integer *= integer.1.radix;
             exponent -= 1;
         }
-        Ok(Some(Number::new(
-            integer.span.concat(mantissa.0),
-            integer.radix,
-            integer.integer + mantissa.1,
-            Some(exponent),
-        )))
+        Ok(Some(integer.concat(mantissa, |i, m| {
+            Number::new(i.radix, i.integer + m, Some(exponent))
+        })))
     }
-    fn next_exponent_integer(&mut self, radix: u32) -> Result<(Span, i64)> {
+    fn next_exponent_integer(&mut self, radix: u32) -> Result<SpanOf<i64>> {
         let sign = self.next_if(|ch| matches!(ch.1, '+' | '-'))?;
         let Some(first_digit) = self.next_digit(radix)? else {
             return Err(match sign {
-                Some(s) => self.error(Span::new(s.0, s.1.len_utf8()), ErrorKind::MissingExponent),
+                Some(s) => self.error(s.0, ErrorKind::MissingExponent),
                 None => self.error_here(ErrorKind::MissingExponent),
             });
         };
-        let mut integer = first_digit.1 as i64;
-        let mut end = first_digit.0 + 1;
+        let mut integer = first_digit.map(|i| i as i64);
         loop {
             let prev = self.clone();
             self.next_if(|ch| ch.1 == '_')?;
@@ -184,21 +162,20 @@ impl<R: Read> Parser<R> {
                 *self = prev;
                 break;
             };
-            integer = integer * (radix as i64) + (digit.1 as i64);
-            end = digit.0 + 1;
+            integer = integer.concat(digit, |i, d| i * (radix as i64) + (d as i64));
         }
-        if let Some((_, '-')) = sign {
-            integer = -integer;
+        if let Some(SpanOf(_, '-')) = sign {
+            integer.1 = -integer.1;
         }
-        Ok((Span::from_end(first_digit.0, end), integer))
+        Ok(integer)
     }
     /// Parses full number
-    pub fn next_number(&mut self) -> Result<Option<Number>> {
+    pub fn next_number(&mut self) -> Result<Option<SpanOf<Number>>> {
         let Some(real) = self.next_real()? else {
             return Ok(None);
         };
         let Some(_) = self.next_if(|ch| {
-            if real.radix > 10 {
+            if real.1.radix > 10 {
                 matches!(ch.1, 'p' | 'P')
             } else {
                 matches!(ch.1, 'e' | 'E')
@@ -207,51 +184,49 @@ impl<R: Read> Parser<R> {
         else {
             return Ok(Some(real));
         };
-        let exponent = self.next_exponent_integer(real.radix).map_err(|mut e| {
-            e.span = e.span.concat(real.span.clone());
+        let exponent = self.next_exponent_integer(real.1.radix).map_err(|mut e| {
+            e.span = e.span.concat(real.0);
             e
         })?;
-        Ok(Some(Number {
-            span: real.span.concat(exponent.0),
-            radix: real.radix,
-            integer: real.integer,
-            exponent: Some(exponent.1 + real.exponent.unwrap_or(0)),
-        }))
+        Ok(Some(real.concat(exponent, |r, e| {
+            Number::new(r.radix, r.integer, Some(e + r.exponent.unwrap_or(0)))
+        })))
     }
-    pub fn next_ident(&mut self) -> Result<Option<CachedString>> {
-        let Some((start, ch)) = self.next_if(|ch| ch.1.is_alphabetic() || ch.1 == '_')? else {
+    pub fn next_ident(&mut self) -> Result<Option<SpanOf<CachedString>>> {
+        let Some(first) = self.next_if(|ch| ch.1.is_alphabetic() || ch.1 == '_')? else {
             return Ok(None);
         };
-        let mut end = start + ch.len_utf8();
-        while let Some((current, ch)) = self.next_if(|(_, ch)| ch.is_alphanumeric() || ch == '_')? {
-            end = current + ch.len_utf8();
+        let mut span = first.0;
+        while let Some(ch) = self.next_if(|ch| ch.1.is_alphanumeric() || ch.1 == '_')? {
+            span = span.concat(ch.0);
         }
-        while let Some((current, ch)) = self.next_if(|(_, ch)| ch == '\'')? {
-            end = current + ch.len_utf8()
+        while let Some(ch) = self.next_if(|ch| ch.1 == '\'')? {
+            span = span.concat(ch.0);
         }
-        Ok(Some(CachedString {
-            span: Span::from_end(start, end),
-            cache: self.ident_cache.clone(),
-            id: self
-                .ident_cache
-                .borrow_mut()
-                .insert(self.buffer.borrow()[start..end].to_string()),
-        }))
+        Ok(Some(SpanOf(
+            span,
+            CachedString {
+                cache: self.ident_cache.clone(),
+                id: self
+                    .ident_cache
+                    .borrow_mut()
+                    .insert(self.buffer.borrow()[span.start..span.end()].to_string()),
+            },
+        )))
     }
-    fn next_char(&mut self, raw: bool) -> Result<Option<(Span, char)>> {
-        let next_hex_digits = |parser: &mut Self, count: usize| -> Result<Option<(Span, u32)>> {
+    fn next_char(&mut self, raw: bool) -> Result<Option<SpanOf<char>>> {
+        let next_hex_digits = |parser: &mut Self, count: usize| -> Result<Option<SpanOf<u32>>> {
             let mut number = None;
             for _ in 0..count {
                 let Some(digit) = parser.next_and(|ch| match ch.1.to_digit(16) {
-                    Some(hex) => Some((ch.0, hex)),
+                    Some(hex) => Some(SpanOf(ch.0, hex)),
                     None => None,
                 })?
                 else {
                     return Ok(None);
                 };
-                let span = Span::new(digit.0, 1);
-                let num = number.unwrap_or((span, 0_u32));
-                number = Some((num.0.concat(span), num.1 * 16 + digit.1));
+                let num = number.unwrap_or(SpanOf(digit.0, 0_u32));
+                number = Some(num.concat(digit, |n, d| n * 16 + d))
             }
             Ok(number)
         };
@@ -262,19 +237,19 @@ impl<R: Read> Parser<R> {
             '\\' if !raw => {
                 let escape = self
                     .next()?
-                    .ok_or(self.error(Span::from_char_offset(ch), ErrorKind::InvalidEscape))?;
-                let span = Span::from_end(ch.0, escape.0 + escape.1.len_utf8());
+                    .ok_or(self.error(ch.0, ErrorKind::InvalidEscape))?;
+                let span = ch.0.concat(escape.0);
                 Ok(Some(match escape.1 {
-                    'a' => (span, '\x07'),
-                    'b' => (span, '\x08'),
-                    'n' => (span, '\n'),
-                    't' => (span, '\t'),
-                    'r' => (span, '\r'),
-                    'f' => (span, '\x0c'),
-                    '\'' => (span, '\''),
-                    '"' => (span, '"'),
-                    '\\' => (span, '\\'),
-                    '0' => (span, '\0'),
+                    'a' => SpanOf(span, '\x07'),
+                    'b' => SpanOf(span, '\x08'),
+                    'n' => SpanOf(span, '\n'),
+                    't' => SpanOf(span, '\t'),
+                    'r' => SpanOf(span, '\r'),
+                    'f' => SpanOf(span, '\x0c'),
+                    '\'' => SpanOf(span, '\''),
+                    '"' => SpanOf(span, '"'),
+                    '\\' => SpanOf(span, '\\'),
+                    '0' => SpanOf(span, '\0'),
                     'x' | 'u' | 'U' => {
                         let Some(hex_digits) = next_hex_digits(
                             self,
@@ -290,25 +265,24 @@ impl<R: Read> Parser<R> {
                         let Some(ch) = char::from_u32(hex_digits.1) else {
                             return Err(self.error(hex_digits.0, ErrorKind::InvalidUnicode));
                         };
-                        (span.concat(hex_digits.0), ch)
+                        SpanOf(span.concat(hex_digits.0), ch)
                     }
                     _ => return Err(self.error(span, ErrorKind::InvalidEscape)),
                 }))
             }
-            _ => Ok(Some((Span::from_char_offset(ch), ch.1))),
+            _ => Ok(Some(ch)),
         }
     }
-    pub fn next_literal_string(&mut self) -> Result<Option<CachedString>> {
+    pub fn next_literal_string(&mut self) -> Result<Option<SpanOf<CachedString>>> {
         let prev = self.clone();
         let raw_start = self.next_if(|ch| ch.1 == 'r')?;
         let depth = match raw_start {
             Some(_) => {
-                let mut depth: Option<(Span, usize)> = None;
+                let mut depth: Option<SpanOf<usize>> = None;
                 while let Some(ch) = self.next_if(|ch| ch.1 == '(')? {
-                    let span = Span::from_char_offset(ch);
                     depth = Some(match depth {
-                        Some(d) => (d.0.concat(span), d.1 + 1),
-                        None => (span, 1),
+                        Some(d) => d.concat(ch, |d, _| d + 1),
+                        None => SpanOf(ch.0, 1),
                     });
                 }
                 depth
@@ -319,16 +293,16 @@ impl<R: Read> Parser<R> {
             *self = prev;
             return Ok(None);
         };
-        let mut span = Span::from_char_offset(quote_start);
+        let mut span = quote_start.0;
         let mut string = String::new();
         if let Some(ch) = raw_start {
-            span = span.concat(Span::from_char_offset(ch));
+            span = span.concat(ch.0);
         }
 
         loop {
             let prev = self.clone();
             if let Some(end_quote) = self.next_if(|ch| ch.1 == quote_start.1)? {
-                let mut span1 = Span::from_char_offset(end_quote);
+                let mut span1 = end_quote.0;
                 let mut satisfies = true;
                 match depth {
                     Some(depth) => {
@@ -337,7 +311,7 @@ impl<R: Read> Parser<R> {
                                 satisfies = false;
                                 break;
                             };
-                            span1 = span1.concat(Span::from_char_offset(bracket));
+                            span1 = span1.concat(bracket.0);
                         }
                     }
                     None => {}
@@ -355,19 +329,21 @@ impl<R: Read> Parser<R> {
             string.push(ch.1);
         }
 
-        Ok(Some(CachedString {
+        Ok(Some(SpanOf(
             span,
-            id: self.string_cache.borrow_mut().insert(string),
-            cache: self.string_cache.clone(),
-        }))
+            CachedString {
+                id: self.string_cache.borrow_mut().insert(string),
+                cache: self.string_cache.clone(),
+            },
+        )))
     }
-    pub fn next_primitive(&mut self) -> Result<Option<Primitive>> {
+    pub fn next_primitive(&mut self) -> Result<Option<SpanOf<Primitive>>> {
         Ok(Some(if let Some(n) = self.next_number()? {
-            Primitive::Number(n)
+            n.map(Primitive::Number)
         } else if let Some(i) = self.next_ident()? {
-            Primitive::Ident(i)
+            i.map(Primitive::Ident)
         } else if let Some(s) = self.next_literal_string()? {
-            Primitive::String(s)
+            s.map(Primitive::String)
         } else {
             return Ok(None);
         }))
@@ -395,7 +371,7 @@ mod tests {
         ];
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_number().unwrap().unwrap();
+            let result = parser.next_number().unwrap().unwrap().1;
             assert_eq!(
                 (result.radix, result.integer, result.exponent),
                 (a.0, a.1.into(), a.2)
@@ -407,7 +383,7 @@ mod tests {
         let questions = ["___", "_test", "test123", "x", "x'", "x''"];
         for q in questions {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_ident().unwrap().unwrap();
+            let result = parser.next_ident().unwrap().unwrap().1;
             assert_eq!(&*result.get_str(), q);
         }
     }
@@ -437,7 +413,7 @@ mod tests {
         ];
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_literal_string().unwrap().unwrap();
+            let result = parser.next_literal_string().unwrap().unwrap().1;
             assert_eq!(&*result.get_str(), a);
         }
     }
