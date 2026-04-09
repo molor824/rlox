@@ -73,11 +73,11 @@ impl fmt::Display for Error {
 /// If parser method returns None, it's expected for the Source to be rolled back to the previous state by the parsing function
 /// However if it returns Err, it's expected for the Source to be at the location where the error occured.
 pub struct Parser<R: ?Sized> {
-    pub reader: Rc<RefCell<BufReader<R>>>,
-    pub buffer: Rc<RefCell<String>>,
-    pub ident_cache: Rc<RefCell<Cache<String>>>,
-    pub string_cache: Rc<RefCell<Cache<String>>>,
-    pub offset: usize,
+    reader: Rc<RefCell<BufReader<R>>>,
+    buffer: Rc<RefCell<String>>,
+    ident_cache: Rc<RefCell<Cache<str>>>,
+    string_cache: Rc<RefCell<Cache<str>>>,
+    offset: usize,
 }
 impl<R> Clone for Parser<R> {
     fn clone(&self) -> Self {
@@ -98,6 +98,22 @@ impl<R: Read> Parser<R> {
             ident_cache: Rc::new(RefCell::new(Cache::new())),
             string_cache: Rc::new(RefCell::new(Cache::new())),
             offset: 0,
+        }
+    }
+    pub fn get_ident_id(&self, ident: &str) -> usize {
+        let mut ident_cache = self.ident_cache.borrow_mut();
+        if let Some(id) = ident_cache.get_id(ident) {
+            id
+        } else {
+            ident_cache.insert_rc(Rc::from(ident))
+        }
+    }
+    pub fn get_string_id(&self, string: &str) -> usize {
+        let mut string_cache = self.string_cache.borrow_mut();
+        if let Some(id) = string_cache.get_id(string) {
+            id
+        } else {
+            string_cache.insert_rc(Rc::from(string))
         }
     }
     pub fn error(&self, span: Span, kind: ErrorKind) -> Error {

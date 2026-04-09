@@ -40,17 +40,22 @@ impl Number {
 #[derive(Clone)]
 pub struct CachedString {
     pub id: usize,
-    pub cache: Rc<RefCell<Cache<String>>>,
+    pub cache: Rc<RefCell<Cache<str>>>,
 }
 impl CachedString {
     pub fn get_str<'a>(&'a self) -> Ref<'a, str> {
         Ref::map(self.cache.borrow(), |cache| {
-            cache.get_data(self.id).unwrap().as_str()
+            cache.get_data(self.id).unwrap()
         })
     }
 }
+impl fmt::Debug for CachedString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CachedString").field(&self.get_str()).finish()
+    }
+}
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Primitive {
     Ident(CachedString),
     String(CachedString),
@@ -77,6 +82,68 @@ impl<R: Read> Parser<R> {
             return Err(self.error(digit_ch.0, ErrorKind::NotDigit(digit_ch.1, radix)));
         };
         Ok(Some(SpanOf(digit_ch.0, digit)))
+    }
+    pub fn next_sequence(&mut self, sequence: &str) -> Result<Option<Span>> {
+        let prev = self.clone();
+        let mut span: Option<Span> = None;
+        for ch in sequence.chars() {
+            let Some(ch1) = self.next()? else {
+                break;
+            };
+            if ch1.1 != ch {
+                break;
+            }
+            span = Some(match span {
+                Some(s) => s.concat(ch1.0),
+                None => ch1.0,
+            });
+        }
+        if span.is_none() {
+            *self = prev;
+        }
+        Ok(span)
+    }
+    fn skip_whitespace(&mut self, skip_newline: bool) -> Result<bool> {
+        let mut skipped = false;
+        while self
+            .next_if(|ch| {
+                if skip_newline {
+                    ch.1.is_whitespace()
+                } else {
+                    ch.1.is_whitespace() && ch.1 != '\n' && ch.1 != '\r'
+                }
+            })?
+            .is_some()
+        {
+            skipped = true;
+        }
+        Ok(skipped)
+    }
+    fn skip_comments(&mut self) -> Result<bool> {
+        let mut skipped = false;
+        if self.next_if(|ch| ch.1 == '#')?.is_some() {
+            skipped = true;
+            if self.next_if(|ch| ch.1 == '{')?.is_some() {
+                loop {
+                    if self.next_sequence("}#")?.is_some() || self.next()?.is_none() {
+                        break;
+                    }
+                }
+            } else {
+                while self.next_if(|ch| ch.1 != '\n')?.is_some() {}
+            }
+        }
+        Ok(skipped)
+    }
+    pub fn skip(&mut self, skip_newline: bool) -> Result<bool> {
+        let mut skipped = false;
+        loop {
+            if self.skip_whitespace(skip_newline)? || self.skip_comments()? {
+                skipped = true;
+                continue;
+            }
+            return Ok(skipped);
+        }
     }
     /// Parses partial integer. More specifically, it parses integer without the prefix part, sending the radix as a parameter
     fn next_partial_integer(&mut self, radix: u32) -> Result<Option<SpanOf<BigInt>>> {
@@ -207,10 +274,7 @@ impl<R: Read> Parser<R> {
             span,
             CachedString {
                 cache: self.ident_cache.clone(),
-                id: self
-                    .ident_cache
-                    .borrow_mut()
-                    .insert(self.buffer.borrow()[span.start..span.end()].to_string()),
+                id: self.get_ident_id(&self.buffer.borrow()[span.start..span.end()]),
             },
         )))
     }
@@ -332,18 +396,19 @@ impl<R: Read> Parser<R> {
         Ok(Some(SpanOf(
             span,
             CachedString {
-                id: self.string_cache.borrow_mut().insert(string),
                 cache: self.string_cache.clone(),
+                id: self.get_string_id(&string),
             },
         )))
     }
-    pub fn next_primitive(&mut self) -> Result<Option<SpanOf<Primitive>>> {
+    pub fn next_primitive(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Primitive>>> {
+        self.skip(skip_newline)?;
         Ok(Some(if let Some(n) = self.next_number()? {
             n.map(Primitive::Number)
-        } else if let Some(i) = self.next_ident()? {
-            i.map(Primitive::Ident)
         } else if let Some(s) = self.next_literal_string()? {
             s.map(Primitive::String)
+        } else if let Some(i) = self.next_ident()? {
+            i.map(Primitive::Ident)
         } else {
             return Ok(None);
         }))
@@ -352,7 +417,7 @@ impl<R: Read> Parser<R> {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::Parser;
+    use crate::ast::{primitive::Primitive, Parser};
 
     #[test]
     fn num_parsing() {
@@ -415,6 +480,93 @@ mod tests {
             let mut parser = Parser::new(q.as_bytes());
             let result = parser.next_literal_string().unwrap().unwrap().1;
             assert_eq!(&*result.get_str(), a);
+        }
+    }
+    #[test]
+    fn primitive_parsing() {
+        let mut parser = Parser::new(
+            r#"ident 1 10 0xdEaD00 0o123123
+# Must ignore comment!
+0b1011_1101
+            "string" "escape\nstring" "string
+with newline"
+            r"raw string
+with newline"
+r"should ignore this escape!\n"
+r("let me "quote" this!")
+r(("let me ("bracket and quote") this!"))
+#{ Must be ignored!
+"comment, instead of string"
+        }#
+        x'
+        x''
+        _'''
+        10.
+        0.1
+        0x0.F
+        0b1.10
+        123e-10
+        12.3e10
+        1.23E+10
+        0xde.adP+beef
+        0b1010e+1010
+        0o77.E-71"\u4f60\U0000597d"
+#{ Unfinished comment, cuz why not
+"#
+            .as_bytes(),
+        );
+        #[derive(Debug)]
+        enum Answer {
+            Ident(&'static str),
+            String(&'static str),
+            Number(u32, i64, Option<i64>),
+        }
+        let answers = [
+            Answer::Ident("ident"),
+            Answer::Number(10, 1, None),
+            Answer::Number(10, 10, None),
+            Answer::Number(16, 0xdead00, None),
+            Answer::Number(8, 0o123123, None),
+            Answer::Number(2, 0b1011_1101, None),
+            Answer::String("string"),
+            Answer::String("escape\nstring"),
+            Answer::String("string\nwith newline"),
+            Answer::String("raw string\nwith newline"),
+            Answer::String(r"should ignore this escape!\n"),
+            Answer::String(r#"let me "quote" this!"#),
+            Answer::String(r#"let me ("bracket and quote") this!"#),
+            Answer::Ident("x'"),
+            Answer::Ident("x''"),
+            Answer::Ident("_'''"),
+            Answer::Number(10, 1, Some(1)),
+            Answer::Number(10, 1, Some(-1)),
+            Answer::Number(16, 0xF, Some(-1)),
+            Answer::Number(2, 0b11, Some(-1)),
+            Answer::Number(10, 123, Some(-10)),
+            Answer::Number(10, 123, Some(9)),
+            Answer::Number(10, 123, Some(8)),
+            Answer::Number(16, 0xdead, Some(0xbeef - 2)),
+            Answer::Number(2, 0b101, Some(0b1010 + 1)),
+            Answer::Number(8, 0o77, Some(-0o71)),
+            Answer::String("\u{4f60}\u{597d}"),
+        ];
+        impl PartialEq<Primitive> for Answer {
+            fn eq(&self, other: &Primitive) -> bool {
+                match (self, other) {
+                    (Answer::Ident(i1), Primitive::Ident(i2)) => *i1 == &*i2.get_str(),
+                    (Answer::Number(radix, integer, exponent), Primitive::Number(num)) => {
+                        num.radix == *radix
+                            && num.integer == (*integer).into()
+                            && num.exponent == *exponent
+                    }
+                    (Answer::String(s1), Primitive::String(s2)) => *s1 == &*s2.get_str(),
+                    _ => false,
+                }
+            }
+        }
+        for answer in answers {
+            let result = parser.next_primitive(true).unwrap().unwrap().1;
+            assert_eq!(answer, result);
         }
     }
 }

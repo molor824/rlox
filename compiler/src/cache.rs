@@ -1,11 +1,11 @@
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, rc::Rc};
 
-pub struct Cache<T> {
+pub struct Cache<T: ?Sized> {
     ids: HashMap<usize, Rc<T>>,
     datas: HashMap<Rc<T>, usize>,
     id_count: usize,
 }
-impl<T> Cache<T> {
+impl<T: ?Sized> Cache<T> {
     pub fn new() -> Self {
         Self {
             ids: HashMap::new(),
@@ -23,6 +23,19 @@ impl<T: Eq + Hash> Cache<T> {
                 let data = Rc::new(value);
                 self.datas.insert(data.clone(), self.id_count);
                 self.ids.insert(self.id_count, data);
+                self.id_count
+            }
+        }
+    }
+}
+impl<T: ?Sized + Eq + Hash> Cache<T> {
+    pub fn insert_rc(&mut self, value: Rc<T>) -> usize {
+        match self.datas.get(&value) {
+            Some(&id) => id,
+            None => {
+                self.id_count += 1;
+                self.datas.insert(value.clone(), self.id_count);
+                self.ids.insert(self.id_count, value);
                 self.id_count
             }
         }
