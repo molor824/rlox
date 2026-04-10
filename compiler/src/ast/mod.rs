@@ -1,4 +1,5 @@
-pub mod primitive;
+mod primary;
+mod primitive;
 
 use std::{
     cell::RefCell,
@@ -7,7 +8,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::cache::Cache;
+use crate::{
+    ast::primitive::{CachedString, Number},
+    cache::Cache,
+};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -26,7 +30,9 @@ pub enum ErrorKind {
     #[error("Invalid unicode")]
     InvalidUnicode,
     #[error("String literal unterminated")]
-    UnterminatedString
+    UnterminatedString,
+    #[error("Expected `)`")]
+    ExpectedRightParen,
 }
 #[derive(thiserror::Error)]
 pub struct Error {
@@ -39,7 +45,10 @@ impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Error")
             .field("kind", &self.kind)
-            .field("span", &&self.source.borrow()[self.span.start..self.span.end()])
+            .field(
+                "span",
+                &(self.span.start..self.span.end, &self.source.borrow()[self.span.start..self.span.end]),
+            )
             .finish()
     }
 }
@@ -123,10 +132,13 @@ impl<R: Read> Parser<R> {
             source: self.buffer.clone(),
         }
     }
-    pub fn error_here(&self, kind: ErrorKind) -> Error {
-        self.error(Span::new(self.offset, 0), kind)
+    pub fn error_to_here(&self, from: usize, kind: ErrorKind) -> Error {
+        self.error(Span::new(from, self.offset), kind)
     }
-    pub fn next_and<T>(&mut self, then: impl FnOnce(SpanOf<char>) -> Option<T>) -> Result<Option<T>> {
+    pub fn next_and<T>(
+        &mut self,
+        then: impl FnOnce(SpanOf<char>) -> Option<T>,
+    ) -> Result<Option<T>> {
         let prev = self.clone();
         let Some(ch) = self.next()? else {
             return Ok(None);
@@ -137,7 +149,10 @@ impl<R: Read> Parser<R> {
         };
         Ok(Some(v))
     }
-    pub fn next_if(&mut self, condition: impl FnOnce(SpanOf<char>) -> bool) -> Result<Option<SpanOf<char>>> {
+    pub fn next_if(
+        &mut self,
+        condition: impl FnOnce(SpanOf<char>) -> bool,
+    ) -> Result<Option<SpanOf<char>>> {
         let prev = self.clone();
         let Some(ch) = self.next()? else {
             return Ok(None);
@@ -156,43 +171,97 @@ impl<R: Read> Parser<R> {
                 Some(ch) => {
                     let index = self.offset;
                     self.offset += ch.len_utf8();
-                    return Ok(Some(SpanOf(Span::new(index, ch.len_utf8()), ch)));
+                    return Ok(Some(SpanOf(Span::from_len(index, ch.len_utf8()), ch)));
                 }
                 None => {
-                    if reader.read_line(&mut buffer).map_err(|e| self.error_here(e.into()))? == 0 {
+                    if reader
+                        .read_line(&mut buffer)
+                        .map_err(|e| self.error(Span::from_len(self.offset, 0), e.into()))?
+                        == 0
+                    {
                         return Ok(None);
                     }
                 }
             }
         }
     }
+    // Is used for recursive expressions
+    // NOTE: Update when the top most expression implementation changes
+    pub fn next_expression(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        self.next_primary(skip_newline)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    Ident(SpanOf<CachedString>),
+    String(SpanOf<CachedString>),
+    Number(SpanOf<Number>),
+    Group(SpanOf<Box<Expression>>),
+    Tuple(SpanOf<Vec<Expression>>),
+}
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Group(group) => write!(f, "({})", group.1),
+            Self::Ident(ident) => write!(f, "{}", ident.1),
+            Self::Number(number) => write!(f, "{}", number.1),
+            Self::String(string) => write!(f, "{:?}", string.1.get_str()),
+            Self::Tuple(tuple) => write!(
+                f,
+                "({})",
+                tuple.1
+                    .iter()
+                    .map(|expr| format!("{},", expr))
+                    .collect::<String>()
+            ),
+        }
+    }
+}
+impl GetSpan for Expression {
+    fn span(&self) -> Span {
+        match self {
+            Self::Group(group) => group.0,
+            Self::Ident(ident) => ident.0,
+            Self::Number(number) => number.0,
+            Self::String(string) => string.0,
+            Self::Tuple(tuple) => tuple.0,
+        }
+    }
+}
+
+pub trait GetSpan {
+    fn span(&self) -> Span;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
-    pub len: usize
+    pub end: usize,
 }
 impl Span {
-    pub const fn new(start: usize, len: usize) -> Self {
-        Self { start, len }
+    pub const fn from_len(start: usize, len: usize) -> Self {
+        Self { start, end: start + len }
     }
     pub const fn from_char_offset(ch: (usize, char)) -> Self {
-        Self { start: ch.0, len: ch.1.len_utf8() }
+        Self::from_len(ch.0, ch.1.len_utf8())
     }
-    pub const fn from_end(start: usize, end: usize) -> Self {
-        Self { start, len: end - start }
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self {
+            start,
+            end
+        }
     }
-    pub const fn end(&self) -> usize {
-        self.start + self.len
+    pub const fn len(&self) -> usize {
+        self.end - self.start
     }
     pub fn with_end(self, new_end: usize) -> Self {
-        Self::from_end(self.start, new_end)
+        Self::new(self.start, new_end)
     }
     pub fn concat(self, other: Span) -> Span {
         let start = self.start.min(other.start);
-        let end = self.end().max(other.end());
-        Span::from_end(start, end)
+        let end = self.end.max(other.end);
+        Span::new(start, end)
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -203,5 +272,9 @@ impl<T> SpanOf<T> {
     }
     pub fn concat<U, Q>(self, other: SpanOf<U>, f: impl FnOnce(T, U) -> Q) -> SpanOf<Q> {
         SpanOf(self.0.concat(other.0), f(self.1, other.1))
+    }
+    pub fn concat_span(mut self, other: Span) -> Self {
+        self.0 = self.0.concat(other);
+        self
     }
 }
