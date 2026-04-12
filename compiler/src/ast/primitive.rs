@@ -106,7 +106,7 @@ impl<R: Read> Parser<R> {
         };
         Ok(Some(SpanOf(digit_ch.0, digit)))
     }
-    fn next_sequence(&mut self, sequence: &str) -> Result<Option<Span>> {
+    pub fn next_sequence(&mut self, sequence: &str) -> Result<Option<Span>> {
         let prev = self.clone();
         let mut span: Option<Span> = None;
         for ch in sequence.chars() {
@@ -125,10 +125,6 @@ impl<R: Read> Parser<R> {
             *self = prev;
         }
         Ok(span)
-    }
-    pub fn next_symbol(&mut self, symbol: &str, skip_newline: bool) -> Result<Option<Span>> {
-        self.skip(skip_newline)?;
-        self.next_sequence(symbol)
     }
     fn skip_whitespace(&mut self, skip_newline: bool) -> Result<bool> {
         let mut skipped = false;
@@ -162,7 +158,7 @@ impl<R: Read> Parser<R> {
         }
         Ok(skipped)
     }
-    fn skip(&mut self, skip_newline: bool) -> Result<bool> {
+    pub fn skip(&mut self, skip_newline: bool) -> Result<bool> {
         let mut skipped = false;
         loop {
             if self.skip_whitespace(skip_newline)? || self.skip_comments()? {
@@ -264,7 +260,9 @@ impl<R: Read> Parser<R> {
         Ok(integer)
     }
     /// Parses full number
-    pub fn next_number(&mut self) -> Result<Option<SpanOf<Number>>> {
+    fn next_number(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Number>>> {
+        self.skip(skip_newline)?;
+
         let Some(real) = self.next_real()? else {
             return Ok(None);
         };
@@ -286,7 +284,9 @@ impl<R: Read> Parser<R> {
             Number::new(r.radix, r.integer, Some(e + r.exponent.unwrap_or(0)))
         })))
     }
-    pub fn next_ident(&mut self) -> Result<Option<SpanOf<CachedString>>> {
+    pub fn next_ident(&mut self, skip_newline: bool) -> Result<Option<SpanOf<CachedString>>> {
+        self.skip(skip_newline)?;
+
         let Some(first) = self.next_if(|ch| ch.1.is_alphabetic() || ch.1 == '_')? else {
             return Ok(None);
         };
@@ -364,8 +364,10 @@ impl<R: Read> Parser<R> {
             _ => Ok(Some(ch)),
         }
     }
-    pub fn next_literal_string(&mut self) -> Result<Option<SpanOf<CachedString>>> {
+    fn next_literal_string(&mut self, skip_newline: bool) -> Result<Option<SpanOf<CachedString>>> {
         let prev = self.clone();
+        self.skip(skip_newline)?;
+
         let raw_start = self.next_if(|ch| ch.1 == 'r')?;
         let depth = match raw_start {
             Some(_) => {
@@ -429,13 +431,20 @@ impl<R: Read> Parser<R> {
         )))
     }
     pub fn next_primitive(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.skip(skip_newline)?;
-        Ok(Some(if let Some(n) = self.next_number()? {
+        Ok(Some(if let Some(n) = self.next_number(skip_newline)? {
             Expression::Number(n)
-        } else if let Some(s) = self.next_literal_string()? {
+        } else if let Some(s) = self.next_literal_string(skip_newline)? {
             Expression::String(s)
-        } else if let Some(i) = self.next_ident()? {
-            Expression::Ident(i)
+        } else if let Some(i) = self.next_ident(skip_newline)? {
+            let s = i.1.get_str();
+            match &*s {
+                "true" => Expression::Boolean(SpanOf(i.0, true)),
+                "false" => Expression::Boolean(SpanOf(i.0, false)),
+                _ => {
+                    drop(s);
+                    Expression::Ident(i)
+                }
+            }
         } else {
             return Ok(None);
         }))
@@ -463,7 +472,7 @@ mod tests {
         ];
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_number().unwrap().unwrap().1;
+            let result = parser.next_number(true).unwrap().unwrap().1;
             assert_eq!(
                 (result.radix, result.integer, result.exponent),
                 (a.0, a.1.into(), a.2)
@@ -475,7 +484,7 @@ mod tests {
         let questions = ["___", "_test", "test123", "x", "x'", "x''"];
         for q in questions {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_ident().unwrap().unwrap().1;
+            let result = parser.next_ident(true).unwrap().unwrap().1;
             assert_eq!(&*result.get_str(), q);
         }
     }
@@ -505,7 +514,7 @@ mod tests {
         ];
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_literal_string().unwrap().unwrap().1;
+            let result = parser.next_literal_string(true).unwrap().unwrap().1;
             assert_eq!(&*result.get_str(), a);
         }
     }

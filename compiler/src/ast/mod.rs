@@ -33,6 +33,8 @@ pub enum ErrorKind {
     UnterminatedString,
     #[error("Expected `)`")]
     ExpectedRightParen,
+    #[error("Expected `]`")]
+    ExpectedRightSquare,
 }
 #[derive(thiserror::Error)]
 pub struct Error {
@@ -47,7 +49,10 @@ impl fmt::Debug for Error {
             .field("kind", &self.kind)
             .field(
                 "span",
-                &(self.span.start..self.span.end, &self.source.borrow()[self.span.start..self.span.end]),
+                &(
+                    self.span.start..self.span.end,
+                    &self.source.borrow()[self.span.start..self.span.end],
+                ),
             )
             .finish()
     }
@@ -199,6 +204,8 @@ pub enum Expression {
     Number(SpanOf<Number>),
     Group(SpanOf<Box<Expression>>),
     Tuple(SpanOf<Vec<Expression>>),
+    Array(SpanOf<Vec<Expression>>),
+    Boolean(SpanOf<bool>),
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -210,7 +217,17 @@ impl fmt::Display for Expression {
             Self::Tuple(tuple) => write!(
                 f,
                 "({})",
-                tuple.1
+                tuple
+                    .1
+                    .iter()
+                    .map(|expr| format!("{},", expr))
+                    .collect::<String>()
+            ),
+            Self::Boolean(boolean) => write!(f, "{}", boolean.1),
+            Self::Array(arr) => write!(
+                f,
+                "[{}]",
+                arr.1
                     .iter()
                     .map(|expr| format!("{},", expr))
                     .collect::<String>()
@@ -226,6 +243,8 @@ impl GetSpan for Expression {
             Self::Number(number) => number.0,
             Self::String(string) => string.0,
             Self::Tuple(tuple) => tuple.0,
+            Self::Boolean(boolean) => boolean.0,
+            Self::Array(array) => array.0,
         }
     }
 }
@@ -241,16 +260,16 @@ pub struct Span {
 }
 impl Span {
     pub const fn from_len(start: usize, len: usize) -> Self {
-        Self { start, end: start + len }
+        Self {
+            start,
+            end: start + len,
+        }
     }
     pub const fn from_char_offset(ch: (usize, char)) -> Self {
         Self::from_len(ch.0, ch.1.len_utf8())
     }
     pub const fn new(start: usize, end: usize) -> Self {
-        Self {
-            start,
-            end
-        }
+        Self { start, end }
     }
     pub const fn len(&self) -> usize {
         self.end - self.start
