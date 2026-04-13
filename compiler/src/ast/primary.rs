@@ -1,8 +1,6 @@
-use std::io::Read;
-
 use crate::ast::*;
 
-impl<R: Read> Parser<R> {
+impl Parser {
     pub fn next_symbol(&mut self, symbol: &str, skip_newline: bool) -> Result<Option<Span>> {
         self.skip(skip_newline)?;
         self.next_sequence(symbol)

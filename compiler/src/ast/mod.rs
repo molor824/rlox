@@ -4,7 +4,7 @@ mod primitive;
 use std::{
     cell::RefCell,
     fmt,
-    io::{self, BufRead, BufReader, Read},
+    io::{self, BufRead},
     rc::Rc,
 };
 
@@ -86,28 +86,18 @@ impl fmt::Display for Error {
 /// It's always mutably referenced in parser methods to advance.
 /// If parser method returns None, it's expected for the Source to be rolled back to the previous state by the parsing function
 /// However if it returns Err, it's expected for the Source to be at the location where the error occured.
-pub struct Parser<R: ?Sized> {
-    reader: Rc<RefCell<BufReader<R>>>,
+#[derive(Clone)]
+pub struct Parser {
+    reader: Rc<RefCell<dyn BufRead>>,
     buffer: Rc<RefCell<String>>,
     ident_cache: Rc<RefCell<Cache<str>>>,
     string_cache: Rc<RefCell<Cache<str>>>,
     offset: usize,
 }
-impl<R> Clone for Parser<R> {
-    fn clone(&self) -> Self {
+impl Parser {
+    pub fn new(reader: impl BufRead + 'static) -> Self {
         Self {
-            reader: self.reader.clone(),
-            buffer: self.buffer.clone(),
-            ident_cache: self.ident_cache.clone(),
-            string_cache: self.string_cache.clone(),
-            offset: self.offset,
-        }
-    }
-}
-impl<R: Read> Parser<R> {
-    pub fn new(reader: R) -> Self {
-        Self {
-            reader: Rc::new(RefCell::new(BufReader::new(reader))),
+            reader: Rc::new(RefCell::new(reader)),
             buffer: Rc::new(RefCell::new(String::new())),
             ident_cache: Rc::new(RefCell::new(Cache::new())),
             string_cache: Rc::new(RefCell::new(Cache::new())),
@@ -170,7 +160,6 @@ impl<R: Read> Parser<R> {
     }
     pub fn next(&mut self) -> Result<Option<SpanOf<char>>> {
         let mut buffer = self.buffer.borrow_mut();
-        let mut reader = self.reader.borrow_mut();
         loop {
             match buffer.get(self.offset..).and_then(|str| str.chars().next()) {
                 Some(ch) => {
@@ -179,6 +168,7 @@ impl<R: Read> Parser<R> {
                     return Ok(Some(SpanOf(Span::from_len(index, ch.len_utf8()), ch)));
                 }
                 None => {
+                    let mut reader = self.reader.borrow_mut();
                     if reader
                         .read_line(&mut buffer)
                         .map_err(|e| self.error(Span::from_len(self.offset, 0), e.into()))?
