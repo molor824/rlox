@@ -109,7 +109,7 @@ mod tests {
             "t[*t[1,2],3,*t[4]]",
         ];
         for answer in answers {
-            let result = parser.next_expression(true).unwrap().unwrap().to_string();
+            let result = parser.next_tuple(true).unwrap().unwrap().to_string();
             assert_eq!(result, answer);
         }
     }

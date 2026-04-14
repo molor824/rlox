@@ -453,6 +453,28 @@ impl<B: BufRead> Parser<B> {
         self.skip(skip_newline)?;
         self.next_sequence(symbol)
     }
+    pub fn next_symbols<'a>(&mut self, symbols: impl IntoIterator<Item = &'a str>, skip_newline: bool) -> Result<Option<SpanOf<&'a str>>> {
+        self.skip(skip_newline)?;
+        for symbol in symbols {
+            if let Some(s) = self.next_sequence(symbol)? {
+                return Ok(Some(SpanOf(s, symbol)));
+            }
+        }
+        Ok(None)
+    }
+    pub fn next_keyword(&mut self, keyword: &str, skip_newline: bool) -> Result<Option<SpanOf<CachedString>>> {
+        let prev = self.clone();
+        self.skip(skip_newline)?;
+        Ok(match self.next_ident(skip_newline)? {
+            Some(ident) if &*ident.1.get_str() == keyword => {
+                Some(ident)
+            },
+            _ => {
+                *self = prev;
+                None
+            }
+        })
+    }
 }
 
 #[cfg(test)]

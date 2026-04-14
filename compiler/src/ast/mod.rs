@@ -40,6 +40,8 @@ pub enum ErrorKind {
     UnexpectedUnpacking,
     #[error("Expected identifier")]
     ExpectedIdent,
+    #[error("Expected expression")]
+    ExpectedExpr,
 }
 #[derive(thiserror::Error)]
 pub struct Error {
@@ -198,7 +200,7 @@ impl<B: BufRead> Parser<B> {
     // Is used for recursive expressions
     // NOTE: Update when the top most expression implementation changes
     pub fn next_expression(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_primary(skip_newline)
+        self.next_unary(skip_newline)
     }
 }
 
@@ -266,6 +268,31 @@ impl GetSpan for PostfixOperator {
 }
 
 #[derive(Debug, Clone)]
+pub enum PrefixOperator {
+    Negate(Span),
+    Swap(Span),
+    Not(Span),
+}
+impl fmt::Display for PrefixOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Negate(_) => write!(f, "-"),
+            Self::Swap(_) => write!(f, "~"),
+            Self::Not(_) => write!(f, "!"),
+        }
+    }
+}
+impl GetSpan for PrefixOperator {
+    fn span(&self) -> Span {
+        match self {
+            Self::Negate(n) => *n,
+            Self::Swap(s) => *s,
+            Self::Not(n) => *n,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
     Ident(SpanOf<CachedString>),
     String(SpanOf<CachedString>),
@@ -278,6 +305,10 @@ pub enum Expression {
         operator: PostfixOperator,
         operand: Box<Expression>,
     },
+    Prefix {
+        operator: PrefixOperator,
+        operand: Box<Expression>,
+    }
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -307,6 +338,7 @@ impl fmt::Display for Expression {
                     .join(",")
             ),
             Self::Postfix { operand, operator } => write!(f, "{}{}", operand, operator),
+            Self::Prefix { operator, operand } => write!(f, "{}{}", operator, operand),
         }
     }
 }
@@ -321,6 +353,7 @@ impl GetSpan for Expression {
             Self::Boolean(boolean) => boolean.0,
             Self::Array(array) => array.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
+            Self::Prefix { operator, operand } => operator.span().concat(operand.span()),
         }
     }
 }

@@ -43,6 +43,39 @@ impl<B: BufRead> Parser<B> {
             };
         }
     }
+    fn next_prefix_operators(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let mut operators = vec![];
+        loop {
+            if let Some(ch) = self.next_symbols(["-", "~", "!"], skip_newline)? {
+                operators.push(match ch.1 {
+                    "-" => PrefixOperator::Negate(ch.0),
+                    "~" => PrefixOperator::Swap(ch.0),
+                    "!" => PrefixOperator::Not(ch.0),
+                    _ => unreachable!(),
+                });
+            } else if let Some(not) = self.next_keyword("not", skip_newline)? {
+                operators.push(PrefixOperator::Not(not.0));
+            } else {
+                break;
+            }
+        }
+
+        let Some(mut expr) = self.next_postfix_operators(skip_newline)? else {
+            if let Some(op) = operators.last() {
+                return Err(self.error(op.span(), ErrorKind::ExpectedExpr));
+            } else {
+                return Ok(None);
+            }
+        };
+        
+        while let Some(op) = operators.pop() {
+            expr = Expression::Prefix { operator: op, operand: Box::new(expr) };
+        }
+        Ok(Some(expr))
+    }
+    pub fn next_unary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        self.next_prefix_operators(skip_newline)
+    }
 }
 
 #[cfg(test)]
@@ -60,5 +93,13 @@ mod tests {
             .unwrap()
             .to_string();
         assert_eq!(result, answer);
+    }
+    #[test]
+    fn parse_unary() {
+        let question = "---!~~!!!a.b.c(d,e)[f,]";
+        let answer = "---!~~!!!a.b.c(d,e)[f]";
+        let mut parser = Parser::new(question.as_bytes());
+        let result = parser.next_unary(false).unwrap().unwrap().to_string();
+        assert_eq!(result, answer)
     }
 }
