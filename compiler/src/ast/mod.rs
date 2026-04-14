@@ -1,5 +1,6 @@
 mod primary;
 mod primitive;
+mod unary;
 
 use std::{
     cell::RefCell,
@@ -35,6 +36,10 @@ pub enum ErrorKind {
     ExpectedRightParen,
     #[error("Expected `]`")]
     ExpectedRightSquare,
+    #[error("Cannot use unpacking operation here")]
+    UnexpectedUnpacking,
+    #[error("Expected identifier")]
+    ExpectedIdent,
 }
 #[derive(thiserror::Error)]
 pub struct Error {
@@ -86,16 +91,26 @@ impl fmt::Display for Error {
 /// It's always mutably referenced in parser methods to advance.
 /// If parser method returns None, it's expected for the Source to be rolled back to the previous state by the parsing function
 /// However if it returns Err, it's expected for the Source to be at the location where the error occured.
-#[derive(Clone)]
-pub struct Parser {
-    reader: Rc<RefCell<dyn BufRead>>,
+pub struct Parser<B> {
+    reader: Rc<RefCell<B>>,
     buffer: Rc<RefCell<String>>,
     ident_cache: Rc<RefCell<Cache<str>>>,
     string_cache: Rc<RefCell<Cache<str>>>,
     offset: usize,
 }
-impl Parser {
-    pub fn new(reader: impl BufRead + 'static) -> Self {
+impl<B> Clone for Parser<B> {
+    fn clone(&self) -> Self {
+        Self {
+            reader: self.reader.clone(),
+            buffer: self.buffer.clone(),
+            ident_cache: self.ident_cache.clone(),
+            string_cache: self.string_cache.clone(),
+            offset: self.offset,
+        }
+    }
+}
+impl<B: BufRead> Parser<B> {
+    pub fn new(reader: B) -> Self {
         Self {
             reader: Rc::new(RefCell::new(reader)),
             buffer: Rc::new(RefCell::new(String::new())),
@@ -188,14 +203,81 @@ impl Parser {
 }
 
 #[derive(Debug, Clone)]
+pub enum Element {
+    Regular(Expression),
+    Unpacking(SpanOf<Expression>),
+}
+impl fmt::Display for Element {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Regular(expr) => write!(f, "{}", expr),
+            Self::Unpacking(unpacking) => write!(f, "*{}", unpacking.1),
+        }
+    }
+}
+impl GetSpan for Element {
+    fn span(&self) -> Span {
+        match self {
+            Self::Regular(expr) => expr.span(),
+            Self::Unpacking(unpacking) => unpacking.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum PostfixOperator {
+    Property(SpanOf<CachedString>),
+    Call(SpanOf<Vec<Element>>),
+    Index(SpanOf<Vec<Element>>),
+}
+impl fmt::Display for PostfixOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Property(property) => write!(f, ".{}", property.1),
+            Self::Call(args) => write!(
+                f,
+                "({})",
+                args.1
+                    .iter()
+                    .map(|arg| arg.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            Self::Index(args) => write!(
+                f,
+                "[{}]",
+                args.1
+                    .iter()
+                    .map(|arg| arg.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        }
+    }
+}
+impl GetSpan for PostfixOperator {
+    fn span(&self) -> Span {
+        match self {
+            Self::Property(p) => p.0,
+            Self::Call(c) => c.0,
+            Self::Index(i) => i.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Expression {
     Ident(SpanOf<CachedString>),
     String(SpanOf<CachedString>),
     Number(SpanOf<Number>),
     Group(SpanOf<Box<Expression>>),
-    Tuple(SpanOf<Vec<Expression>>),
-    Array(SpanOf<Vec<Expression>>),
+    Tuple(SpanOf<Vec<Element>>),
+    Array(SpanOf<Vec<Element>>),
     Boolean(SpanOf<bool>),
+    Postfix {
+        operator: PostfixOperator,
+        operand: Box<Expression>,
+    },
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -206,12 +288,13 @@ impl fmt::Display for Expression {
             Self::String(string) => write!(f, "{:?}", string.1.get_str()),
             Self::Tuple(tuple) => write!(
                 f,
-                "({})",
+                "t[{}]",
                 tuple
                     .1
                     .iter()
-                    .map(|expr| format!("{},", expr))
-                    .collect::<String>()
+                    .map(|expr| expr.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
             Self::Boolean(boolean) => write!(f, "{}", boolean.1),
             Self::Array(arr) => write!(
@@ -219,9 +302,11 @@ impl fmt::Display for Expression {
                 "[{}]",
                 arr.1
                     .iter()
-                    .map(|expr| format!("{},", expr))
-                    .collect::<String>()
+                    .map(|expr| expr.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
             ),
+            Self::Postfix { operand, operator } => write!(f, "{}{}", operand, operator),
         }
     }
 }
@@ -235,6 +320,7 @@ impl GetSpan for Expression {
             Self::Tuple(tuple) => tuple.0,
             Self::Boolean(boolean) => boolean.0,
             Self::Array(array) => array.0,
+            Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
         }
     }
 }

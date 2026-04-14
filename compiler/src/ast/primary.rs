@@ -1,27 +1,30 @@
 use crate::ast::*;
 
-impl Parser {
-    pub fn next_symbol(&mut self, symbol: &str, skip_newline: bool) -> Result<Option<Span>> {
-        self.skip(skip_newline)?;
-        self.next_sequence(symbol)
+impl<B: BufRead> Parser<B> {
+    fn next_element(&mut self, skip_newline: bool) -> Result<Option<Element>> {
+        let Some(star) = self.next_symbol("*", skip_newline)? else {
+            return Ok(self.next_expression(skip_newline)?.map(Element::Regular));
+        };
+        Ok(self
+            .next_expression(skip_newline)?
+            .map(|expr| Element::Unpacking(SpanOf(star.concat(expr.span()), expr))))
     }
 
-    fn next_expressions(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Vec<Expression>>>> {
-        let Some(mut expressions) = self
-            .next_expression(skip_newline)?
+    pub fn next_elements(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Vec<Element>>>> {
+        let Some(mut elements) = self
+            .next_element(skip_newline)?
             .map(|expr| SpanOf(expr.span(), vec![expr]))
         else {
             return Ok(None);
         };
-        while let Some(comma) = self.next_symbol(",", skip_newline)? {
-            let Some(expression) = self.next_expression(skip_newline)? else {
-                expressions.0 = expressions.0.concat(comma);
-                return Ok(Some(expressions));
+        while self.next_symbol(",", skip_newline)?.is_some() {
+            let Some(element) = self.next_element(skip_newline)? else {
+                return Ok(Some(elements));
             };
-            expressions.0 = expressions.0.concat(expression.span());
-            expressions.1.push(expression);
+            elements.0 = elements.0.concat(element.span());
+            elements.1.push(element);
         }
-        Ok(Some(expressions))
+        Ok(Some(elements))
     }
 
     /// Returns either tuple or group expression. (a) - group expression, (a,) - tuple
@@ -29,7 +32,7 @@ impl Parser {
         let Some(start) = self.next_symbol("(", skip_newline)? else {
             return Ok(None);
         };
-        let Some(expression) = self.next_expression(true)? else {
+        let Some(first_elem) = self.next_element(true)? else {
             // might be an empty tuple
             let Some(end) = self.next_symbol(")", true)? else {
                 return Err(self.error(start, ErrorKind::ExpectedRightParen));
@@ -39,26 +42,28 @@ impl Parser {
         // Check if its a tuple
         if self.next_symbol(",", true)?.is_some() {
             // Start tuple mode
-            let mut expressions = self
-                .next_expressions(true)?
+            let mut elements = self
+                .next_elements(true)?
                 .map(|expr| expr.1)
                 .unwrap_or(vec![]);
             let Some(end) = self.next_symbol(")", true)? else {
-                return Err(self.error_to_here(start.start, ErrorKind::ExpectedRightParen));
+                return Err(self.error(start, ErrorKind::ExpectedRightParen));
             };
-            expressions.insert(0, expression);
-            Ok(Some(Expression::Tuple(SpanOf(
-                start.concat(end),
-                expressions,
-            ))))
+            elements.insert(0, first_elem);
+            Ok(Some(Expression::Tuple(SpanOf(start.concat(end), elements))))
         } else {
             // Group mode
             let Some(end) = self.next_symbol(")", true)? else {
-                return Err(self.error_to_here(start.start, ErrorKind::ExpectedRightParen));
+                return Err(self.error(start, ErrorKind::ExpectedRightParen));
             };
             Ok(Some(Expression::Group(SpanOf(
                 start.concat(end),
-                Box::new(expression),
+                Box::new(match first_elem {
+                    Element::Regular(expr) => expr,
+                    Element::Unpacking(unpacking) => {
+                        return Err(self.error(unpacking.0, ErrorKind::UnexpectedUnpacking))
+                    }
+                }),
             ))))
         }
     }
@@ -66,22 +71,22 @@ impl Parser {
         let Some(start) = self.next_symbol("[", skip_newline)? else {
             return Ok(None);
         };
-        let expressions = self.next_expressions(skip_newline)?;
+        let elements = self
+            .next_elements(skip_newline)?
+            .map(|expr| expr.1)
+            .unwrap_or(vec![]);
         let Some(end) = self.next_symbol("]", skip_newline)? else {
-            return Err(self.error_to_here(start.start, ErrorKind::ExpectedRightSquare));
+            return Err(self.error(start, ErrorKind::ExpectedRightSquare));
         };
-        Ok(Some(Expression::Array(SpanOf(
-            start.concat(end),
-            expressions.map(|expr| expr.1).unwrap_or(vec![]),
-        ))))
+        Ok(Some(Expression::Array(SpanOf(start.concat(end), elements))))
     }
     pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         Ok(Some(if let Some(tuple) = self.next_tuple(skip_newline)? {
             tuple
-        } else if let Some(primitive) = self.next_primitive(skip_newline)? {
-            primitive
         } else if let Some(array) = self.next_array(skip_newline)? {
             array
+        } else if let Some(primitive) = self.next_primitive(skip_newline)? {
+            primitive
         } else {
             return Ok(None);
         }))
@@ -94,9 +99,15 @@ mod tests {
 
     #[test]
     fn parse_tuple() {
-        let mut parser =
-            Parser::new("(1, 2, 3) ((1, 2), (3, (4,))) ((1), (2,), (3, 4))".as_bytes());
-        let answers = ["(1,2,3,)", "((1,2,),(3,(4,),),)", "((1),(2,),(3,4,),)"];
+        let mut parser = Parser::new(
+            "(1, 2, 3) ((1, 2), (3, (4,))) ((1), (2,), (3, 4))(*(1, 2,), 3, *(4,))".as_bytes(),
+        );
+        let answers = [
+            "t[1,2,3]",
+            "t[t[1,2],t[3,t[4]]]",
+            "t[(1),t[2],t[3,4]]",
+            "t[*t[1,2],3,*t[4]]",
+        ];
         for answer in answers {
             let result = parser.next_expression(true).unwrap().unwrap().to_string();
             assert_eq!(result, answer);
@@ -104,15 +115,18 @@ mod tests {
     }
     #[test]
     fn parse_array() {
-        let mut parser = Parser::new("
+        let mut parser = Parser::new(
+            "
         [1,
         (2,
         3,
-        4)]
+        4),*[5]]
         [[1, 2],
         [[(3)],
-        (4,)], 5,]".as_bytes());
-        let answers = ["[1,(2,3,4,),]", "[[1,2,],[[(3),],(4,),],5,]"];
+        (4,)], 5,]"
+                .as_bytes(),
+        );
+        let answers = ["[1,t[2,3,4],*[5]]", "[[1,2],[[(3)],t[4]],5]"];
         for answer in answers {
             let result = parser.next_array(true).unwrap().unwrap().to_string();
             assert_eq!(result, answer);

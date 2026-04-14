@@ -85,7 +85,7 @@ impl fmt::Display for CachedString {
     }
 }
 
-impl Parser {
+impl<B: BufRead> Parser<B> {
     // Every following digit after the first can have one underscore
     // Every alphanumeric characters consequent after one and other, is considered part of number
     // If alphanumeric character is non-digit, then return an error
@@ -448,6 +448,10 @@ impl Parser {
         } else {
             return Ok(None);
         }))
+    }
+    pub fn next_symbol(&mut self, symbol: &str, skip_newline: bool) -> Result<Option<Span>> {
+        self.skip(skip_newline)?;
+        self.next_sequence(symbol)
     }
 }
 
