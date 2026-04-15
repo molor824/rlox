@@ -1,3 +1,4 @@
+mod binary;
 mod primary;
 mod primitive;
 mod unary;
@@ -10,83 +11,16 @@ use std::{
 };
 
 use crate::{
-    ast::primitive::{CachedString, Number},
+    ast::{
+        binary::BinaryOperator,
+        primary::Element,
+        primitive::{CachedString, Number},
+        unary::{PostfixOperator, PrefixOperator},
+    },
     cache::Cache,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug, thiserror::Error)]
-pub enum ErrorKind {
-    #[error("IOError: {0}")]
-    IoError(#[from] io::Error),
-    #[error("Character {0} is not allowed in number with base {1}")]
-    NotDigit(char, u32),
-    #[error("Missing integer")]
-    MissingInteger,
-    #[error("Missing exponent")]
-    MissingExponent,
-    #[error("Invalid escape sequence")]
-    InvalidEscape,
-    #[error("Invalid unicode")]
-    InvalidUnicode,
-    #[error("String literal unterminated")]
-    UnterminatedString,
-    #[error("Expected `)`")]
-    ExpectedRightParen,
-    #[error("Expected `]`")]
-    ExpectedRightSquare,
-    #[error("Cannot use unpacking operation here")]
-    UnexpectedUnpacking,
-    #[error("Expected identifier")]
-    ExpectedIdent,
-    #[error("Expected expression")]
-    ExpectedExpr,
-}
-#[derive(thiserror::Error)]
-pub struct Error {
-    #[source]
-    pub kind: ErrorKind,
-    pub span: Span,
-    pub source: Rc<RefCell<String>>,
-}
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Error")
-            .field("kind", &self.kind)
-            .field(
-                "span",
-                &(
-                    self.span.start..self.span.end,
-                    &self.source.borrow()[self.span.start..self.span.end],
-                ),
-            )
-            .finish()
-    }
-}
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut col = 0;
-        let mut row = 1;
-        let mut prev_ch = '\0';
-        let source = self.source.borrow();
-        for (i, ch) in source.char_indices() {
-            if prev_ch == '\n' || prev_ch == '\r' {
-                col = 1;
-                if prev_ch == '\n' {
-                    row += 1;
-                }
-            } else {
-                col += 1;
-            }
-            if i == self.span.start {
-                return write!(f, "Error [line:{}, col:{}]: {}", row, col, self.kind);
-            }
-            prev_ch = ch;
-        }
-        write!(f, "Error: {}", self.kind)
-    }
-}
 
 /// Struct that handles iteration over chars and storing accumulated chars.
 ///
@@ -204,91 +138,76 @@ impl<B: BufRead> Parser<B> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Element {
-    Regular(Expression),
-    Unpacking(SpanOf<Expression>),
-}
-impl fmt::Display for Element {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Regular(expr) => write!(f, "{}", expr),
-            Self::Unpacking(unpacking) => write!(f, "*{}", unpacking.1),
-        }
-    }
-}
-impl GetSpan for Element {
-    fn span(&self) -> Span {
-        match self {
-            Self::Regular(expr) => expr.span(),
-            Self::Unpacking(unpacking) => unpacking.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum PostfixOperator {
-    Property(SpanOf<CachedString>),
-    Call(SpanOf<Vec<Element>>),
-    Index(SpanOf<Vec<Element>>),
-}
-impl fmt::Display for PostfixOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Property(property) => write!(f, ".{}", property.1),
-            Self::Call(args) => write!(
-                f,
-                "({})",
-                args.1
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-            Self::Index(args) => write!(
-                f,
-                "[{}]",
-                args.1
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-        }
-    }
-}
-impl GetSpan for PostfixOperator {
-    fn span(&self) -> Span {
-        match self {
-            Self::Property(p) => p.0,
-            Self::Call(c) => c.0,
-            Self::Index(i) => i.0,
-        }
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum ErrorKind {
+    #[error("IOError: {0}")]
+    IoError(#[from] io::Error),
+    #[error("Character {0} is not allowed in number with base {1}")]
+    NotDigit(char, u32),
+    #[error("Missing integer")]
+    MissingInteger,
+    #[error("Missing exponent")]
+    MissingExponent,
+    #[error("Invalid escape sequence")]
+    InvalidEscape,
+    #[error("Invalid unicode")]
+    InvalidUnicode,
+    #[error("String literal unterminated")]
+    UnterminatedString,
+    #[error("Expected `)`")]
+    ExpectedRightParen,
+    #[error("Expected `]`")]
+    ExpectedRightSquare,
+    #[error("Cannot use unpacking operation here")]
+    UnexpectedUnpacking,
+    #[error("Expected identifier")]
+    ExpectedIdent,
+    #[error("Expected expression")]
+    ExpectedExpr,
 }
 
-#[derive(Debug, Clone)]
-pub enum PrefixOperator {
-    Negate(Span),
-    Swap(Span),
-    Not(Span),
+#[derive(thiserror::Error)]
+pub struct Error {
+    #[source]
+    pub kind: ErrorKind,
+    pub span: Span,
+    pub source: Rc<RefCell<String>>,
 }
-impl fmt::Display for PrefixOperator {
+impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Negate(_) => write!(f, "-"),
-            Self::Swap(_) => write!(f, "~"),
-            Self::Not(_) => write!(f, "!"),
-        }
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .field(
+                "span",
+                &(
+                    self.span.start..self.span.end,
+                    &self.source.borrow()[self.span.start..self.span.end],
+                ),
+            )
+            .finish()
     }
 }
-impl GetSpan for PrefixOperator {
-    fn span(&self) -> Span {
-        match self {
-            Self::Negate(n) => *n,
-            Self::Swap(s) => *s,
-            Self::Not(n) => *n,
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut col = 0;
+        let mut row = 1;
+        let mut prev_ch = '\0';
+        let source = self.source.borrow();
+        for (i, ch) in source.char_indices() {
+            if prev_ch == '\n' || prev_ch == '\r' {
+                col = 1;
+                if prev_ch == '\n' {
+                    row += 1;
+                }
+            } else {
+                col += 1;
+            }
+            if i == self.span.start {
+                return write!(f, "Error [line:{}, col:{}]: {}", row, col, self.kind);
+            }
+            prev_ch = ch;
         }
+        write!(f, "Error: {}", self.kind)
     }
 }
 
@@ -308,7 +227,12 @@ pub enum Expression {
     Prefix {
         operator: PrefixOperator,
         operand: Box<Expression>,
-    }
+    },
+    Binary {
+        left_operand: Box<Expression>,
+        operator: BinaryOperator,
+        right_operand: Box<Expression>,
+    },
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -339,6 +263,11 @@ impl fmt::Display for Expression {
             ),
             Self::Postfix { operand, operator } => write!(f, "{}{}", operand, operator),
             Self::Prefix { operator, operand } => write!(f, "{}{}", operator, operand),
+            Self::Binary {
+                left_operand,
+                operator,
+                right_operand,
+            } => write!(f, "{}{}{}", left_operand, operator, right_operand),
         }
     }
 }
@@ -354,6 +283,14 @@ impl GetSpan for Expression {
             Self::Array(array) => array.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
             Self::Prefix { operator, operand } => operator.span().concat(operand.span()),
+            Self::Binary {
+                left_operand,
+                operator,
+                right_operand,
+            } => left_operand
+                .span()
+                .concat(right_operand.span())
+                .concat(operator.span()),
         }
     }
 }

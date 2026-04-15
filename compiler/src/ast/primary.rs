@@ -93,6 +93,28 @@ impl<B: BufRead> Parser<B> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Element {
+    Regular(Expression),
+    Unpacking(SpanOf<Expression>),
+}
+impl fmt::Display for Element {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Regular(expr) => write!(f, "{}", expr),
+            Self::Unpacking(unpacking) => write!(f, "*{}", unpacking.1),
+        }
+    }
+}
+impl GetSpan for Element {
+    fn span(&self) -> Span {
+        match self {
+            Self::Regular(expr) => expr.span(),
+            Self::Unpacking(unpacking) => unpacking.0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -454,9 +454,8 @@ impl<B: BufRead> Parser<B> {
         self.next_sequence(symbol)
     }
     pub fn next_symbols<'a>(&mut self, symbols: impl IntoIterator<Item = &'a str>, skip_newline: bool) -> Result<Option<SpanOf<&'a str>>> {
-        self.skip(skip_newline)?;
-        for symbol in symbols {
-            if let Some(s) = self.next_sequence(symbol)? {
+        for symbol in symbols.into_iter() {
+            if let Some(s) = self.next_symbol(symbol, skip_newline)? {
                 return Ok(Some(SpanOf(s, symbol)));
             }
         }
