@@ -53,18 +53,15 @@ impl<B: BufRead> Parser<B> {
             Ok(Some(Expression::Tuple(SpanOf(start.concat(end), elements))))
         } else {
             // Group mode
-            let Some(end) = self.next_symbol(")", true)? else {
+            if self.next_symbol(")", true)?.is_none() {
                 return Err(self.error(start, ErrorKind::ExpectedRightParen));
             };
-            Ok(Some(Expression::Group(SpanOf(
-                start.concat(end),
-                Box::new(match first_elem {
-                    Element::Regular(expr) => expr,
-                    Element::Unpacking(unpacking) => {
-                        return Err(self.error(unpacking.0, ErrorKind::UnexpectedUnpacking))
-                    }
-                }),
-            ))))
+            Ok(Some(match first_elem {
+                Element::Regular(expr) => expr,
+                Element::Unpacking(unpacking) => {
+                    return Err(self.error(unpacking.0, ErrorKind::UnexpectedUnpacking))
+                }
+            }))
         }
     }
     fn next_array(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
@@ -127,7 +124,7 @@ mod tests {
         let answers = [
             "t[1,2,3]",
             "t[t[1,2],t[3,t[4]]]",
-            "t[(1),t[2],t[3,4]]",
+            "t[1,t[2],t[3,4]]",
             "t[*t[1,2],3,*t[4]]",
         ];
         for answer in answers {
@@ -148,7 +145,7 @@ mod tests {
         (4,)], 5,]"
                 .as_bytes(),
         );
-        let answers = ["[1,t[2,3,4],*[5]]", "[[1,2],[[(3)],t[4]],5]"];
+        let answers = ["[1,t[2,3,4],*[5]]", "[[1,2],[[3],t[4]],5]"];
         for answer in answers {
             let result = parser.next_array(true).unwrap().unwrap().to_string();
             assert_eq!(result, answer);

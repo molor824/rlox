@@ -111,18 +111,17 @@ impl<B: BufRead> Parser<B> {
         let mut span: Option<Span> = None;
         for ch in sequence.chars() {
             let Some(ch1) = self.next()? else {
-                break;
+                *self = prev;
+                return Ok(None);
             };
             if ch1.1 != ch {
-                break;
+                *self = prev;
+                return Ok(None);
             }
             span = Some(match span {
                 Some(s) => s.concat(ch1.0),
                 None => ch1.0,
             });
-        }
-        if span.is_none() {
-            *self = prev;
         }
         Ok(span)
     }
