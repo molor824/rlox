@@ -49,7 +49,7 @@ impl<B: BufRead> Parser<B> {
             if let Some(ch) = self.next_symbols(["-", "~", "!"], skip_newline)? {
                 operators.push(PrefixOperator(ch));
             } else if let Some(not) = self.next_keyword("not", skip_newline)? {
-                operators.push(PrefixOperator(not.map(|_| "!")));
+                operators.push(PrefixOperator(SpanOf(not.0, "!")));
             } else {
                 break;
             }
@@ -90,14 +90,14 @@ impl GetSpan for PrefixOperator {
 }
 #[derive(Debug, Clone)]
 pub enum PostfixOperator {
-    Property(SpanOf<CachedString>),
+    Property(SourceSpan),
     Call(SpanOf<Vec<Element>>),
     Index(SpanOf<Vec<Element>>),
 }
 impl fmt::Display for PostfixOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Property(property) => write!(f, ".{}", property.1),
+            Self::Property(property) => write!(f, ".{}", property),
             Self::Call(args) => write!(
                 f,
                 "({})",
@@ -147,7 +147,7 @@ mod tests {
     }
     #[test]
     fn parse_unary() {
-        let question = "\t-- -  !~ ~ !  \t\t !! a . b . c (    d , e ) [ f , ] ";
+        let question = "\t-- -  not~ ~ not  \t\t !not a . b . c (    d , e ) [ f , ] ";
         let answer = "-(-(-(!(~(~(!(!(!(((((a).b).c)(d,e))[f])))))))))";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser.next_unary(false).unwrap().unwrap().to_string();

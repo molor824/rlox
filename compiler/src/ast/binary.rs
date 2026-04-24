@@ -69,9 +69,14 @@ impl<B: BufRead> Parser<B> {
         self.next_left_binary(
             |parser| parser.next_logical_and(skip_newline),
             |parser| {
-                parser
+                if let Some(op) = parser
                     .next_keyword("or", skip_newline)
-                    .map(|i| i.map(|i| BinaryOperator(i.map(|_| "or"))))
+                    .map(|i| i.map(|i| BinaryOperator(SpanOf(i.0, "||"))))?
+                {
+                    Ok(Some(op))
+                } else {
+                    parser.next_binary_operator(["||"], skip_newline)
+                }
             },
         )
     }
@@ -79,16 +84,27 @@ impl<B: BufRead> Parser<B> {
         self.next_left_binary(
             |parser| parser.next_bitwise_or(skip_newline),
             |parser| {
-                parser
+                if let Some(op) = parser
                     .next_keyword("and", skip_newline)
-                    .map(|i| i.map(|i| BinaryOperator(i.map(|_| "and"))))
+                    .map(|i| i.map(|i| BinaryOperator(SpanOf(i.0, "&&"))))?
+                {
+                    Ok(Some(op))
+                } else {
+                    parser.next_binary_operator(["&&"], skip_newline)
+                }
             },
         )
     }
     fn next_bitwise_or(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.next_left_binary(
             |parser| parser.next_bitwise_xor(skip_newline),
-            |parser| parser.next_binary_operator(["|"], skip_newline),
+            |parser| {
+                let mut peek = parser.clone();
+                if let Ok(Some(..)) = peek.next_symbol("||", skip_newline) {
+                    return Ok(None);
+                }
+                parser.next_binary_operator(["|"], skip_newline)
+            },
         )
     }
     fn next_bitwise_xor(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
@@ -100,7 +116,13 @@ impl<B: BufRead> Parser<B> {
     fn next_bitwise_and(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.next_left_binary(
             |parser| parser.next_equality(skip_newline),
-            |parser| parser.next_binary_operator(["&"], skip_newline),
+            |parser| {
+                let mut peek = parser.clone();
+                if let Ok(Some(..)) = peek.next_symbol("&&", skip_newline) {
+                    return Ok(None);
+                }
+                parser.next_binary_operator(["&"], skip_newline)
+            },
         )
     }
     fn next_equality(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
@@ -152,7 +174,7 @@ mod tests {
         let answers = [
             "(-(((3).add)(1)))+(((1)*(6))/(2))",
             "(((1)+(2))+(3))+(((4)+(5))*(6))",
-            "(((1)!=(0))and((3)<=(3)))or((3)>(2))",
+            "(((1)!=(0))&&((3)<=(3)))||((3)>(2))",
         ];
         let mut parser = Parser::new(question.as_bytes());
 

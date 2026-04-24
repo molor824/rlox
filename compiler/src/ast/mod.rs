@@ -14,10 +14,9 @@ use crate::{
     ast::{
         binary::BinaryOperator,
         primary::Element,
-        primitive::{CachedString, Number},
+        primitive::{SourceSpan, Number},
         unary::{PostfixOperator, PrefixOperator},
-    },
-    cache::Cache,
+    }
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -30,8 +29,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Parser<B> {
     reader: Rc<RefCell<B>>,
     buffer: Rc<RefCell<String>>,
-    ident_cache: Rc<RefCell<Cache<str>>>,
-    string_cache: Rc<RefCell<Cache<str>>>,
     offset: usize,
 }
 impl<B> Clone for Parser<B> {
@@ -39,8 +36,6 @@ impl<B> Clone for Parser<B> {
         Self {
             reader: self.reader.clone(),
             buffer: self.buffer.clone(),
-            ident_cache: self.ident_cache.clone(),
-            string_cache: self.string_cache.clone(),
             offset: self.offset,
         }
     }
@@ -50,25 +45,7 @@ impl<B: BufRead> Parser<B> {
         Self {
             reader: Rc::new(RefCell::new(reader)),
             buffer: Rc::new(RefCell::new(String::new())),
-            ident_cache: Rc::new(RefCell::new(Cache::new())),
-            string_cache: Rc::new(RefCell::new(Cache::new())),
             offset: 0,
-        }
-    }
-    pub fn get_ident_id(&self, ident: &str) -> usize {
-        let mut ident_cache = self.ident_cache.borrow_mut();
-        if let Some(id) = ident_cache.get_id(ident) {
-            id
-        } else {
-            ident_cache.insert_rc(Rc::from(ident))
-        }
-    }
-    pub fn get_string_id(&self, string: &str) -> usize {
-        let mut string_cache = self.string_cache.borrow_mut();
-        if let Some(id) = string_cache.get_id(string) {
-            id
-        } else {
-            string_cache.insert_rc(Rc::from(string))
         }
     }
     pub fn error(&self, span: Span, kind: ErrorKind) -> Error {
@@ -213,8 +190,8 @@ impl fmt::Display for Error {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Ident(SpanOf<CachedString>),
-    String(SpanOf<CachedString>),
+    Ident(SourceSpan),
+    String(SpanOf<String>),
     Number(SpanOf<Number>),
     Tuple(SpanOf<Vec<Element>>),
     Array(SpanOf<Vec<Element>>),
@@ -236,9 +213,9 @@ pub enum Expression {
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Ident(ident) => write!(f, "{}", ident.1),
+            Self::Ident(ident) => write!(f, "{}", ident),
             Self::Number(number) => write!(f, "{}", number.1),
-            Self::String(string) => write!(f, "{:?}", string.1.get_str()),
+            Self::String(string) => write!(f, "{:?}", string.1),
             Self::Tuple(tuple) => write!(
                 f,
                 "t[{}]",

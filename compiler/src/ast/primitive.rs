@@ -61,27 +61,20 @@ impl Number {
     }
 }
 #[derive(Clone)]
-pub struct CachedString {
-    id: usize,
-    cache: Rc<RefCell<Cache<str>>>,
-}
-impl CachedString {
-    pub fn get_str<'a>(&'a self) -> Ref<'a, str> {
-        Ref::map(self.cache.borrow(), |cache| {
-            cache.get_data(self.id).unwrap()
-        })
+pub struct SourceSpan(pub Span, pub Rc<RefCell<String>>);
+impl SourceSpan {
+    pub fn get_str(&self) -> Ref<'_, str> {
+        Ref::map(self.1.borrow(), |r| &r[self.0.start..self.0.end])
     }
 }
-impl fmt::Debug for CachedString {
+impl fmt::Display for SourceSpan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("CachedString")
-            .field(&self.get_str())
-            .finish()
+        write!(f, "{}", self.get_str())
     }
 }
-impl fmt::Display for CachedString {
+impl fmt::Debug for SourceSpan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", &*self.get_str())
+        write!(f, "{:?}", self.get_str())
     }
 }
 
@@ -283,7 +276,7 @@ impl<B: BufRead> Parser<B> {
             Number::new(r.radix, r.integer, Some(e + r.exponent.unwrap_or(0)))
         })))
     }
-    pub fn next_ident(&mut self, skip_newline: bool) -> Result<Option<SpanOf<CachedString>>> {
+    pub fn next_ident(&mut self, skip_newline: bool) -> Result<Option<SourceSpan>> {
         self.skip(skip_newline)?;
 
         let Some(first) = self.next_if(|ch| ch.1.is_alphabetic() || ch.1 == '_')? else {
@@ -296,13 +289,7 @@ impl<B: BufRead> Parser<B> {
         while let Some(ch) = self.next_if(|ch| ch.1 == '\'')? {
             span = span.concat(ch.0);
         }
-        Ok(Some(SpanOf(
-            span,
-            CachedString {
-                cache: self.ident_cache.clone(),
-                id: self.get_ident_id(&self.buffer.borrow()[span.start..span.end]),
-            },
-        )))
+        Ok(Some(SourceSpan(span, self.buffer.clone())))
     }
     fn next_char(&mut self, raw: bool) -> Result<Option<SpanOf<char>>> {
         let next_hex_digits = |parser: &mut Self, count: usize| -> Result<Option<SpanOf<u32>>> {
@@ -363,7 +350,7 @@ impl<B: BufRead> Parser<B> {
             _ => Ok(Some(ch)),
         }
     }
-    fn next_literal_string(&mut self, skip_newline: bool) -> Result<Option<SpanOf<CachedString>>> {
+    fn next_literal_string(&mut self, skip_newline: bool) -> Result<Option<SpanOf<String>>> {
         let prev = self.clone();
         self.skip(skip_newline)?;
 
@@ -421,13 +408,7 @@ impl<B: BufRead> Parser<B> {
             string.push(ch.1);
         }
 
-        Ok(Some(SpanOf(
-            span,
-            CachedString {
-                cache: self.string_cache.clone(),
-                id: self.get_string_id(&string),
-            },
-        )))
+        Ok(Some(SpanOf(span, string)))
     }
     pub fn next_primitive(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         Ok(Some(if let Some(n) = self.next_number(skip_newline)? {
@@ -435,7 +416,7 @@ impl<B: BufRead> Parser<B> {
         } else if let Some(s) = self.next_literal_string(skip_newline)? {
             Expression::String(s)
         } else if let Some(i) = self.next_ident(skip_newline)? {
-            let s = i.1.get_str();
+            let s = i.get_str();
             match &*s {
                 "true" => Expression::Boolean(SpanOf(i.0, true)),
                 "false" => Expression::Boolean(SpanOf(i.0, false)),
@@ -452,7 +433,11 @@ impl<B: BufRead> Parser<B> {
         self.skip(skip_newline)?;
         self.next_sequence(symbol)
     }
-    pub fn next_symbols<'a>(&mut self, symbols: impl IntoIterator<Item = &'a str>, skip_newline: bool) -> Result<Option<SpanOf<&'a str>>> {
+    pub fn next_symbols<'a>(
+        &mut self,
+        symbols: impl IntoIterator<Item = &'a str>,
+        skip_newline: bool,
+    ) -> Result<Option<SpanOf<&'a str>>> {
         for symbol in symbols.into_iter() {
             if let Some(s) = self.next_symbol(symbol, skip_newline)? {
                 return Ok(Some(SpanOf(s, symbol)));
@@ -460,13 +445,15 @@ impl<B: BufRead> Parser<B> {
         }
         Ok(None)
     }
-    pub fn next_keyword(&mut self, keyword: &str, skip_newline: bool) -> Result<Option<SpanOf<CachedString>>> {
+    pub fn next_keyword(
+        &mut self,
+        keyword: &str,
+        skip_newline: bool,
+    ) -> Result<Option<SourceSpan>> {
         let prev = self.clone();
         self.skip(skip_newline)?;
         Ok(match self.next_ident(skip_newline)? {
-            Some(ident) if &*ident.1.get_str() == keyword => {
-                Some(ident)
-            },
+            Some(ident) if &*ident.get_str() == keyword => Some(ident),
             _ => {
                 *self = prev;
                 None
@@ -508,7 +495,7 @@ mod tests {
         let questions = ["___", "_test", "test123", "x", "x'", "x''"];
         for q in questions {
             let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_ident(true).unwrap().unwrap().1;
+            let result = parser.next_ident(true).unwrap().unwrap();
             assert_eq!(&*result.get_str(), q);
         }
     }
@@ -539,7 +526,7 @@ mod tests {
         for (q, a) in qna {
             let mut parser = Parser::new(q.as_bytes());
             let result = parser.next_literal_string(true).unwrap().unwrap().1;
-            assert_eq!(&*result.get_str(), a);
+            assert_eq!(&*result, a);
         }
     }
     #[test]
@@ -602,7 +589,7 @@ r(("let me ("bracket and quote") this!"))
             "0xDEADp+BEED",
             "0b101e+1011",
             "0o77e-71",
-            "\"\u{4f60}\u{597d}\""
+            "\"\u{4f60}\u{597d}\"",
         ];
         for answer in answers {
             let result = parser.next_expression(true).unwrap().unwrap().to_string();
