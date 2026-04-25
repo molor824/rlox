@@ -160,6 +160,16 @@ impl<B: BufRead> Parser<B> {
             return Ok(skipped);
         }
     }
+    pub fn skip_seperator(&mut self) -> Result<bool> {
+        let mut skipped = false;
+        while self
+            .next_if(|ch| ch.1 == ';' || ch.1 == '\n')?
+            .is_some()
+        {
+            skipped = true;
+        }
+        Ok(skipped)
+    }
     /// Parses partial integer. More specifically, it parses integer without the prefix part, sending the radix as a parameter
     fn next_partial_integer(&mut self, radix: u32) -> Result<Option<SpanOf<BigInt>>> {
         let Some(first_digit) = self.next_digit(radix)? else {

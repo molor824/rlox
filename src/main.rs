@@ -5,9 +5,12 @@ fn main() {
     let mut parser = Parser::new(stdin.lock());
 
     loop {
-        let Some(result) = parser.next_expression(true).unwrap() else {
+        let result = parser.next_expression(false).unwrap();
+        if let Some(r) = result {
+            println!("{}", r);
+        }
+        if !parser.skip_seperator().unwrap() {
             break;
-        };
-        println!("{}", result);
+        }
     }
 }
