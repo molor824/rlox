@@ -34,10 +34,10 @@ impl<R: BufRead> Parser<R> {
         let Some(expr) = self.next_expression(skip_newline)? else {
             return Err(self.error(start, ErrorKind::ExpectedExpr));
         };
-        let Some(end) = self.next_symbol(")", skip_newline)? else {
+        let Some(_) = self.next_symbol(")", skip_newline)? else {
             return Err(self.error(expr.span(), ErrorKind::ExpectedRightParen));
         };
-        Ok(Some(Expression::Group(SpanOf(start.concat(end), expr.into()))))
+        Ok(Some(expr))
     }
     fn next_array(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let Some(start) = self.next_symbol("[", skip_newline)? else {
@@ -92,35 +92,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_tuple() {
-        let mut parser = Parser::new(
-            "(1, 2, 3) ((1, 2), (3, (4,))) ((1), (2,), (3, 4))(*(1, 2,), 3, *(4,))".as_bytes(),
-        );
-        let answers = [
-            "t[1,2,3]",
-            "t[t[1,2],t[3,t[4]]]",
-            "t[1,t[2],t[3,4]]",
-            "t[*t[1,2],3,*t[4]]",
-        ];
-        for answer in answers {
-            let result = parser.next_group(true).unwrap().unwrap().to_string();
-            assert_eq!(result, answer);
-        }
-    }
-    #[test]
     fn parse_array() {
         let mut parser = Parser::new(
             "
         [1,
-        (2,
+        [2,
         3,
-        4),*[5]]
+        4],*[5]]
         [[1, 2],
         [[(3)],
-        (4,)], 5,]"
+        [4,]], 5,]"
                 .as_bytes(),
         );
-        let answers = ["[1,t[2,3,4],*[5]]", "[[1,2],[[3],t[4]],5]"];
+        let answers = ["[1,[2,3,4],*[5]]", "[[1,2],[[3],[4]],5]"];
         for answer in answers {
             let result = parser.next_array(true).unwrap().unwrap().to_string();
             assert_eq!(result, answer);

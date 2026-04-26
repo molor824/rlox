@@ -193,7 +193,6 @@ impl fmt::Display for Error {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Group(SpanOf<Box<Expression>>),
     Ident(SourceSpan),
     String(SpanOf<String>),
     Number(SpanOf<Number>),
@@ -233,7 +232,6 @@ impl fmt::Display for Expression {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            Self::Group(group) => write!(f, "({})", group.1),
             Self::Postfix { operand, operator } => write!(f, "({} {})", operator, operand),
             Self::Prefix { operator, operand } => write!(f, "({} {})", operator, operand),
             Self::Binary {
@@ -253,7 +251,6 @@ impl GetSpan for Expression {
             Self::String(string) => string.0,
             Self::Boolean(boolean) => boolean.0,
             Self::Array(array) => array.0,
-            Self::Group(group) => group.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
             Self::Prefix { operator, operand } => operator.span().concat(operand.span()),
             Self::Binary {
