@@ -78,7 +78,7 @@ impl fmt::Debug for SourceSpan {
     }
 }
 
-impl<B: BufRead> Parser<B> {
+impl<R: BufRead> Parser<R> {
     // Every following digit after the first can have one underscore
     // Every alphanumeric characters consequent after one and other, is considered part of number
     // If alphanumeric character is non-digit, then return an error

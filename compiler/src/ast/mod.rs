@@ -1,6 +1,8 @@
+mod assignment;
 mod binary;
 mod primary;
 mod primitive;
+mod statement;
 mod unary;
 
 use std::{
@@ -10,13 +12,12 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
-    ast::{
-        binary::BinaryOperator,
-        primary::Element,
-        primitive::{SourceSpan, Number},
-        unary::{PostfixOperator, PrefixOperator},
-    }
+use crate::ast::{
+    assignment::Assignee,
+    binary::BinaryOperator,
+    primary::Element,
+    primitive::{Number, SourceSpan},
+    unary::{PostfixOperator, PrefixOperator},
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -26,12 +27,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// It's always mutably referenced in parser methods to advance.
 /// If parser method returns None, it's expected for the Source to be rolled back to the previous state by the parsing function
 /// However if it returns Err, it's expected for the Source to be at the location where the error occured.
-pub struct Parser<B> {
-    reader: Rc<RefCell<B>>,
+pub struct Parser<R> {
+    reader: Rc<RefCell<R>>,
     buffer: Rc<RefCell<String>>,
     offset: usize,
 }
-impl<B> Clone for Parser<B> {
+impl<R> Clone for Parser<R> {
     fn clone(&self) -> Self {
         Self {
             reader: self.reader.clone(),
@@ -40,8 +41,8 @@ impl<B> Clone for Parser<B> {
         }
     }
 }
-impl<B: BufRead> Parser<B> {
-    pub fn new(reader: B) -> Self {
+impl<R: BufRead> Parser<R> {
+    pub fn new(reader: R) -> Self {
         Self {
             reader: Rc::new(RefCell::new(reader)),
             buffer: Rc::new(RefCell::new(String::new())),
@@ -111,7 +112,7 @@ impl<B: BufRead> Parser<B> {
     // Is used for recursive expressions
     // NOTE: Update when the top most expression implementation changes
     pub fn next_expression(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_binary(skip_newline)
+        self.next_assignment(skip_newline)
     }
 }
 
@@ -141,6 +142,8 @@ pub enum ErrorKind {
     ExpectedIdent,
     #[error("Expected expression")]
     ExpectedExpr,
+    #[error("Array splitting already used")]
+    RepeatingSplit,
 }
 
 #[derive(thiserror::Error)]
@@ -190,10 +193,10 @@ impl fmt::Display for Error {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
+    Group(SpanOf<Box<Expression>>),
     Ident(SourceSpan),
     String(SpanOf<String>),
     Number(SpanOf<Number>),
-    Tuple(SpanOf<Vec<Element>>),
     Array(SpanOf<Vec<Element>>),
     Boolean(SpanOf<bool>),
     Postfix {
@@ -209,6 +212,10 @@ pub enum Expression {
         operator: BinaryOperator,
         right_operand: Box<Expression>,
     },
+    Assign {
+        assignee: Assignee,
+        assigner: Box<Expression>,
+    },
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -216,16 +223,6 @@ impl fmt::Display for Expression {
             Self::Ident(ident) => write!(f, "{}", ident),
             Self::Number(number) => write!(f, "{}", number.1),
             Self::String(string) => write!(f, "{:?}", string.1),
-            Self::Tuple(tuple) => write!(
-                f,
-                "t[{}]",
-                tuple
-                    .1
-                    .iter()
-                    .map(|expr| expr.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
             Self::Boolean(boolean) => write!(f, "{}", boolean.1),
             Self::Array(arr) => write!(
                 f,
@@ -236,13 +233,15 @@ impl fmt::Display for Expression {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            Self::Postfix { operand, operator } => write!(f, "({}){}", operand, operator),
-            Self::Prefix { operator, operand } => write!(f, "{}({})", operator, operand),
+            Self::Group(group) => write!(f, "({})", group.1),
+            Self::Postfix { operand, operator } => write!(f, "({} {})", operator, operand),
+            Self::Prefix { operator, operand } => write!(f, "({} {})", operator, operand),
             Self::Binary {
                 left_operand,
                 operator,
                 right_operand,
-            } => write!(f, "({}){}({})", left_operand, operator, right_operand),
+            } => write!(f, "({} {} {})", operator, left_operand, right_operand),
+            Self::Assign { assignee, assigner } => write!(f, "(= {} {})", assignee, assigner),
         }
     }
 }
@@ -252,9 +251,9 @@ impl GetSpan for Expression {
             Self::Ident(ident) => ident.0,
             Self::Number(number) => number.0,
             Self::String(string) => string.0,
-            Self::Tuple(tuple) => tuple.0,
             Self::Boolean(boolean) => boolean.0,
             Self::Array(array) => array.0,
+            Self::Group(group) => group.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
             Self::Prefix { operator, operand } => operator.span().concat(operand.span()),
             Self::Binary {
@@ -265,6 +264,7 @@ impl GetSpan for Expression {
                 .span()
                 .concat(right_operand.span())
                 .concat(operator.span()),
+            Self::Assign { assignee, assigner } => assignee.span().concat(assigner.span()),
         }
     }
 }

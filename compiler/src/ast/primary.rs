@@ -1,6 +1,6 @@
 use crate::ast::*;
 
-impl<B: BufRead> Parser<B> {
+impl<R: BufRead> Parser<R> {
     fn next_element(&mut self, skip_newline: bool) -> Result<Option<Element>> {
         let Some(star) = self.next_symbol("*", skip_newline)? else {
             return Ok(self.next_expression(skip_newline)?.map(Element::Regular));
@@ -9,7 +9,6 @@ impl<B: BufRead> Parser<B> {
             .next_expression(skip_newline)?
             .map(|expr| Element::Unpacking(SpanOf(star.concat(expr.span()), expr))))
     }
-
     pub fn next_elements(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Vec<Element>>>> {
         let Some(mut elements) = self
             .next_element(skip_newline)?
@@ -28,41 +27,17 @@ impl<B: BufRead> Parser<B> {
     }
 
     /// Returns either tuple or group expression. (a) - group expression, (a,) - tuple
-    fn next_tuple(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+    fn next_group(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let Some(start) = self.next_symbol("(", skip_newline)? else {
             return Ok(None);
         };
-        let Some(first_elem) = self.next_element(true)? else {
-            // might be an empty tuple
-            let Some(end) = self.next_symbol(")", true)? else {
-                return Err(self.error(start, ErrorKind::ExpectedRightParen));
-            };
-            return Ok(Some(Expression::Tuple(SpanOf(start.concat(end), vec![]))));
+        let Some(expr) = self.next_expression(skip_newline)? else {
+            return Err(self.error(start, ErrorKind::ExpectedExpr));
         };
-        // Check if its a tuple
-        if self.next_symbol(",", true)?.is_some() {
-            // Start tuple mode
-            let mut elements = self
-                .next_elements(true)?
-                .map(|expr| expr.1)
-                .unwrap_or(vec![]);
-            let Some(end) = self.next_symbol(")", true)? else {
-                return Err(self.error(start, ErrorKind::ExpectedRightParen));
-            };
-            elements.insert(0, first_elem);
-            Ok(Some(Expression::Tuple(SpanOf(start.concat(end), elements))))
-        } else {
-            // Group mode
-            if self.next_symbol(")", true)?.is_none() {
-                return Err(self.error(start, ErrorKind::ExpectedRightParen));
-            };
-            Ok(Some(match first_elem {
-                Element::Regular(expr) => expr,
-                Element::Unpacking(unpacking) => {
-                    return Err(self.error(unpacking.0, ErrorKind::UnexpectedUnpacking))
-                }
-            }))
-        }
+        let Some(end) = self.next_symbol(")", skip_newline)? else {
+            return Err(self.error(expr.span(), ErrorKind::ExpectedRightParen));
+        };
+        Ok(Some(Expression::Group(SpanOf(start.concat(end), expr.into()))))
     }
     fn next_array(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let Some(start) = self.next_symbol("[", skip_newline)? else {
@@ -78,7 +53,7 @@ impl<B: BufRead> Parser<B> {
         Ok(Some(Expression::Array(SpanOf(start.concat(end), elements))))
     }
     pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        Ok(Some(if let Some(tuple) = self.next_tuple(skip_newline)? {
+        Ok(Some(if let Some(tuple) = self.next_group(skip_newline)? {
             tuple
         } else if let Some(array) = self.next_array(skip_newline)? {
             array
@@ -128,7 +103,7 @@ mod tests {
             "t[*t[1,2],3,*t[4]]",
         ];
         for answer in answers {
-            let result = parser.next_tuple(true).unwrap().unwrap().to_string();
+            let result = parser.next_group(true).unwrap().unwrap().to_string();
             assert_eq!(result, answer);
         }
     }

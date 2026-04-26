@@ -13,7 +13,10 @@ impl GetSpan for BinaryOperator {
     }
 }
 
-impl<B: BufRead> Parser<B> {
+impl<R: BufRead> Parser<R> {
+    pub fn next_binary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        self.next_logical_or(skip_newline)
+    }
     fn next_binary_operator(
         &mut self,
         operators: impl IntoIterator<Item = &'static str>,
@@ -61,9 +64,6 @@ impl<B: BufRead> Parser<B> {
             };
         }
         Ok(Some(expr))
-    }
-    pub fn next_binary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_logical_or(skip_newline)
     }
     fn next_logical_or(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.next_left_binary(
@@ -170,11 +170,12 @@ mod tests {
     #[test]
     fn parse_binary() {
         let question =
-            "-(3).add(1) + 1 * 6 / 2\n1 + 2 + 3\n+ (\t4 + 5\t) * 6\n1!=0 and 3 <= 3 or 3>2";
+            "-(3).add(1) + 1 * 6 / 2\n1 + 2 + 3\n+ (\t4 + 5\t) * 6\n1!=0 and 3 <= 3 or 3>2\na=b=c=d.e=12";
         let answers = [
             "(-(((3).add)(1)))+(((1)*(6))/(2))",
             "(((1)+(2))+(3))+(((4)+(5))*(6))",
             "(((1)!=(0))&&((3)<=(3)))||((3)>(2))",
+            "(a)=((b)=((c)=(((d).e)=(12))))",
         ];
         let mut parser = Parser::new(question.as_bytes());
 

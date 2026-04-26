@@ -1,6 +1,6 @@
 use super::*;
 
-impl<B: BufRead> Parser<B> {
+impl<R: BufRead> Parser<R> {
     fn next_postfix_operators(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let Some(operand) = self.next_primary(skip_newline)? else {
             return Ok(None);
