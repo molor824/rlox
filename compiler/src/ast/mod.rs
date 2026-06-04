@@ -1,3 +1,5 @@
+#![allow(clippy::len_without_is_empty)]
+
 mod assignment;
 mod binary;
 mod primary;
@@ -64,7 +66,7 @@ impl<R: BufRead> Parser<R> {
         then: impl FnOnce(SpanOf<char>) -> Option<T>,
     ) -> Result<Option<T>> {
         let prev = self.clone();
-        let Some(ch) = self.next()? else {
+        let Some(ch) = self.next_ch()? else {
             return Ok(None);
         };
         let Some(v) = then(ch) else {
@@ -78,16 +80,16 @@ impl<R: BufRead> Parser<R> {
         condition: impl FnOnce(SpanOf<char>) -> bool,
     ) -> Result<Option<SpanOf<char>>> {
         let prev = self.clone();
-        let Some(ch) = self.next()? else {
+        let Some(ch) = self.next_ch()? else {
             return Ok(None);
         };
-        if !condition(ch.clone()) {
+        if !condition(ch) {
             *self = prev;
             return Ok(None);
         }
         Ok(Some(ch))
     }
-    pub fn next(&mut self) -> Result<Option<SpanOf<char>>> {
+    pub fn next_ch(&mut self) -> Result<Option<SpanOf<char>>> {
         let mut buffer = self.buffer.borrow_mut();
         loop {
             match buffer.get(self.offset..).and_then(|str| str.chars().next()) {
@@ -144,6 +146,12 @@ pub enum ErrorKind {
     ExpectedExpr,
     #[error("Array splitting already used")]
     RepeatingSplit,
+    #[error("Expected keyword `{0}`")]
+    ExpectedKeyword(&'static str),
+    #[error("Expected `else` or `end` terminator at the end of block")]
+    ExpectedElse,
+    #[error("Expected `end` terminator at the end of block")]
+    ExpectedEnd,
 }
 
 #[derive(thiserror::Error)]

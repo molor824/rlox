@@ -103,7 +103,7 @@ impl<R: BufRead> Parser<R> {
         let prev = self.clone();
         let mut span: Option<Span> = None;
         for ch in sequence.chars() {
-            let Some(ch1) = self.next()? else {
+            let Some(ch1) = self.next_ch()? else {
                 *self = prev;
                 return Ok(None);
             };
@@ -140,7 +140,7 @@ impl<R: BufRead> Parser<R> {
             skipped = true;
             if self.next_if(|ch| ch.1 == '{')?.is_some() {
                 loop {
-                    if self.next_sequence("}#")?.is_some() || self.next()?.is_none() {
+                    if self.next_sequence("}#")?.is_some() || self.next_ch()?.is_none() {
                         break;
                     }
                 }
@@ -162,10 +162,8 @@ impl<R: BufRead> Parser<R> {
     }
     pub fn skip_seperator(&mut self) -> Result<bool> {
         let mut skipped = false;
-        while self
-            .next_if(|ch| ch.1 == ';' || ch.1 == '\n')?
-            .is_some()
-        {
+        self.skip(false)?;
+        while self.next_if(|ch| ch.1 == ';' || ch.1 == '\n')?.is_some() {
             skipped = true;
         }
         Ok(skipped)
@@ -301,14 +299,12 @@ impl<R: BufRead> Parser<R> {
         }
         Ok(Some(SourceSpan(span, self.buffer.clone())))
     }
-    fn next_char(&mut self, raw: bool) -> Result<Option<SpanOf<char>>> {
+    fn next_escape_char(&mut self, raw: bool) -> Result<Option<SpanOf<char>>> {
         let next_hex_digits = |parser: &mut Self, count: usize| -> Result<Option<SpanOf<u32>>> {
             let mut number = None;
             for _ in 0..count {
-                let Some(digit) = parser.next_and(|ch| match ch.1.to_digit(16) {
-                    Some(hex) => Some(SpanOf(ch.0, hex)),
-                    None => None,
-                })?
+                let Some(digit) =
+                    parser.next_and(|ch| ch.1.to_digit(16).map(|hex| SpanOf(ch.0, hex)))?
                 else {
                     return Ok(None);
                 };
@@ -317,13 +313,13 @@ impl<R: BufRead> Parser<R> {
             }
             Ok(number)
         };
-        let Some(ch) = self.next()? else {
+        let Some(ch) = self.next_ch()? else {
             return Ok(None);
         };
         match ch.1 {
             '\\' if !raw => {
                 let escape = self
-                    .next()?
+                    .next_ch()?
                     .ok_or(self.error(ch.0, ErrorKind::InvalidEscape))?;
                 let span = ch.0.concat(escape.0);
                 Ok(Some(match escape.1 {
@@ -393,17 +389,14 @@ impl<R: BufRead> Parser<R> {
             if let Some(end_quote) = self.next_if(|ch| ch.1 == quote_start.1)? {
                 let mut span1 = end_quote.0;
                 let mut satisfies = true;
-                match depth {
-                    Some(depth) => {
-                        for _ in 0..depth.1 {
-                            let Some(bracket) = self.next_if(|ch| ch.1 == ')')? else {
-                                satisfies = false;
-                                break;
-                            };
-                            span1 = span1.concat(bracket.0);
-                        }
+                if let Some(depth) = depth {
+                    for _ in 0..depth.1 {
+                        let Some(bracket) = self.next_if(|ch| ch.1 == ')')? else {
+                            satisfies = false;
+                            break;
+                        };
+                        span1 = span1.concat(bracket.0);
                     }
-                    None => {}
                 }
                 if satisfies {
                     span = span.concat(span1);
@@ -411,7 +404,7 @@ impl<R: BufRead> Parser<R> {
                 }
             }
             *self = prev;
-            let Some(ch) = self.next_char(raw_start.is_some())? else {
+            let Some(ch) = self.next_escape_char(raw_start.is_some())? else {
                 return Err(self.error(span, ErrorKind::UnterminatedString));
             };
             span = span.concat(ch.0);
@@ -464,6 +457,22 @@ impl<R: BufRead> Parser<R> {
         self.skip(skip_newline)?;
         Ok(match self.next_ident(skip_newline)? {
             Some(ident) if &*ident.get_str() == keyword => Some(ident),
+            _ => {
+                *self = prev;
+                None
+            }
+        })
+    }
+    pub fn next_keywords<'a>(
+        &mut self,
+        keywords: impl IntoIterator<Item = &'a str>,
+        skip_newline: bool,
+    ) -> Result<Option<SourceSpan>> {
+        let prev = self.clone();
+        self.skip(skip_newline)?;
+
+        Ok(match self.next_ident(skip_newline)? {
+            Some(ident) if keywords.into_iter().any(|kwd| &*ident.get_str() == kwd) => Some(ident),
             _ => {
                 *self = prev;
                 None

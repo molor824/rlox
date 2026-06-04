@@ -43,7 +43,7 @@ impl fmt::Display for Assignee {
                 }
                 if let Some(split) = split {
                     if elements.1.len() == split.index.1 {
-                        if elements.1.len() != 0 {
+                        if !elements.1.is_empty() {
                             write!(f, ",")?;
                         }
                         write!(f, "*")?;
