@@ -152,6 +152,8 @@ pub enum ErrorKind {
     ExpectedElse,
     #[error("Expected `end` terminator at the end of block")]
     ExpectedEnd,
+    #[error("Expected `do ... end` block")]
+    ExpectedDoBlock,
 }
 
 #[derive(thiserror::Error)]
