@@ -26,7 +26,6 @@ impl<R: BufRead> Parser<R> {
         Ok(Some(elements))
     }
 
-    /// Returns either tuple or group expression. (a) - group expression, (a,) - tuple
     fn next_group(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let Some(start) = self.next_symbol("(", skip_newline)? else {
             return Ok(None);

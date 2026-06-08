@@ -17,23 +17,22 @@ impl<R: BufRead> Parser<R> {
             } else if let Some(left) = self.next_symbol("(", skip_newline)? {
                 // Call
                 let elements = self
-                    .next_elements(skip_newline)?
+                    .next_elements(true)?
                     .map(|expr| expr.1)
                     .unwrap_or(vec![]);
-                let Some(right) = self.next_symbol(")", skip_newline)? else {
+                let Some(right) = self.next_symbol(")", true)? else {
                     return Err(self.error(left, ErrorKind::ExpectedRightParen));
                 };
                 PostfixOperator::Call(SpanOf(left.concat(right), elements))
             } else if let Some(left) = self.next_symbol("[", skip_newline)? {
                 // Indexing
-                let elements = self
-                    .next_elements(skip_newline)?
-                    .map(|expr| expr.1)
-                    .unwrap_or(vec![]);
-                let Some(right) = self.next_symbol("]", skip_newline)? else {
+                let Some(expr) = self.next_expression(true)? else {
+                    return Err(self.error(left, ErrorKind::ExpectedExpr));
+                };
+                let Some(right) = self.next_symbol("]", true)? else {
                     return Err(self.error(left, ErrorKind::ExpectedRightSquare));
                 };
-                PostfixOperator::Index(SpanOf(left.concat(right), elements))
+                PostfixOperator::Index(SpanOf(left.concat(right), Box::new(expr)))
             } else {
                 return Ok(Some(expr));
             };
@@ -92,7 +91,7 @@ impl GetSpan for PrefixOperator {
 pub enum PostfixOperator {
     Property(SourceSpan),
     Call(SpanOf<Vec<Element>>),
-    Index(SpanOf<Vec<Element>>),
+    Index(SpanOf<Box<Expression>>),
 }
 impl fmt::Display for PostfixOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,15 +106,7 @@ impl fmt::Display for PostfixOperator {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            Self::Index(args) => write!(
-                f,
-                "[{}]",
-                args.1
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
+            Self::Index(args) => write!(f, "[{}]", args.1),
         }
     }
 }
@@ -135,8 +126,8 @@ mod tests {
 
     #[test]
     fn parse_postfix() {
-        let question = "a.b.c[1,](2) (3 , 4)[5, 6, 7, ] (*a)";
-        let answer = "((*a) ([5,6,7] ((3,4) ((2) ([1] (.c (.b a)))))))";
+        let question = "a.b.c[1](2) (3 , 4)[5] (*a)";
+        let answer = "((*a) ([5] ((3,4) ((2) ([1] (.c (.b a)))))))";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser
             .next_postfix_operators(false)
@@ -147,7 +138,7 @@ mod tests {
     }
     #[test]
     fn parse_unary() {
-        let question = "\t-- -  not~ ~ not  \t\t !not a . b . c (    d , e ) [ f , ] ";
+        let question = "\t-- -  not~ ~ not  \t\t !not a . b . c (    d , e ) [ f  ] ";
         let answer = "(- (- (- (! (~ (~ (! (! (! ([f] ((d,e) (.c (.b a)))))))))))))";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser.next_unary(false).unwrap().unwrap().to_string();

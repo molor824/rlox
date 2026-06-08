@@ -1,36 +1,23 @@
 use super::*;
 
-#[derive(Debug, Clone)]
-pub struct BinaryOperator(pub SpanOf<&'static str>);
-impl fmt::Display for BinaryOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0 .1)
-    }
-}
-impl GetSpan for BinaryOperator {
-    fn span(&self) -> Span {
-        self.0 .0
-    }
-}
-
 impl<R: BufRead> Parser<R> {
     pub fn next_binary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_logical_or(skip_newline)
+        self.next_assignment(skip_newline)
     }
     fn next_binary_operator(
         &mut self,
         operators: impl IntoIterator<Item = &'static str>,
         skip_newline: bool,
-    ) -> Result<Option<BinaryOperator>> {
+    ) -> Result<Option<SpanOf<&'static str>>> {
         let prev = self.clone();
-        let mut operator: Option<(BinaryOperator, Self)> = None;
+        let mut operator: Option<(SpanOf<&str>, Self)> = None;
         for op in operators.into_iter() {
             if let Some(span) = self.next_symbol(op, skip_newline)? {
                 operator = match operator {
-                    Some((op1, _)) if op1.0 .0.len() < span.len() => {
-                        Some((BinaryOperator(SpanOf(span, op)), self.clone()))
+                    Some((op1, _)) if op1.1.len() < span.len() => {
+                        Some((SpanOf(span, op), self.clone()))
                     }
-                    None => Some((BinaryOperator(SpanOf(span, op)), self.clone())),
+                    None => Some((SpanOf(span, op), self.clone())),
                     o => o,
                 };
                 *self = prev.clone();
@@ -47,7 +34,7 @@ impl<R: BufRead> Parser<R> {
     fn next_left_binary(
         &mut self,
         mut lower: impl FnMut(&mut Self) -> Result<Option<Expression>>,
-        mut operator: impl FnMut(&mut Self) -> Result<Option<BinaryOperator>>,
+        mut operator: impl FnMut(&mut Self) -> Result<Option<SpanOf<&'static str>>>,
     ) -> Result<Option<Expression>> {
         let Some(mut expr) = lower(self)? else {
             return Ok(None);
@@ -55,7 +42,7 @@ impl<R: BufRead> Parser<R> {
 
         while let Some(op) = operator(self)? {
             let Some(right_operand) = lower(self)? else {
-                return Err(self.error_to_here(op.span().start, ErrorKind::ExpectedExpr));
+                return Err(self.error_to_here(op.0.start, ErrorKind::ExpectedExpr));
             };
             expr = Expression::Binary {
                 left_operand: Box::new(expr),
@@ -65,13 +52,45 @@ impl<R: BufRead> Parser<R> {
         }
         Ok(Some(expr))
     }
+    fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let mut chain = vec![];
+        let lower = |parser: &mut Self| parser.next_logical_or(skip_newline);
+
+        loop {
+            let prev = self.clone();
+            let Ok(Some(assignee)) = lower(self) else {
+                *self = prev;
+                break;
+            };
+            let Some(equal) = self.next_symbols([":=", "="], skip_newline)? else {
+                *self = prev;
+                break;
+            };
+            chain.push((assignee, equal));
+        }
+        let Some(mut expr) = lower(self)? else {
+            if let Some((_, equal)) = chain.last() {
+                return Err(self.error(equal.0, ErrorKind::ExpectedExpr));
+            } else {
+                return Ok(None);
+            }
+        };
+        while let Some((assignee, operator)) = chain.pop() {
+            expr = Expression::Binary {
+                left_operand: Box::new(assignee),
+                right_operand: Box::new(expr),
+                operator,
+            }
+        }
+        Ok(Some(expr))
+    }
     fn next_logical_or(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.next_left_binary(
             |parser| parser.next_logical_and(skip_newline),
             |parser| {
                 if let Some(op) = parser
                     .next_keyword("or", skip_newline)
-                    .map(|i| i.map(|i| BinaryOperator(SpanOf(i.0, "||"))))?
+                    .map(|i| i.map(|i| SpanOf(i.0, "||")))?
                 {
                     Ok(Some(op))
                 } else {
@@ -86,7 +105,7 @@ impl<R: BufRead> Parser<R> {
             |parser| {
                 if let Some(op) = parser
                     .next_keyword("and", skip_newline)
-                    .map(|i| i.map(|i| BinaryOperator(SpanOf(i.0, "&&"))))?
+                    .map(|i| i.map(|i| SpanOf(i.0, "&&")))?
                 {
                     Ok(Some(op))
                 } else {
@@ -170,17 +189,18 @@ mod tests {
     #[test]
     fn parse_binary() {
         let question =
-            "-(3).add(1) + 1 * 6 / 2\n1 + 2 + 3\n+ (\t4 + 5\t) * 6\n1!=0 and 3 <= 3 or 3>2";
+            "a := b := -(3).add(1) + 1 * 6 / 2; a := b.x = 1 + 2 + 3\n+ (\t4 + 5\t) * 6; a = b := 1!=0 and 3 <= 3 or 3>2";
         let answers = [
-            "(+ (- ((1) (.add 3))) (/ (* 1 6) 2))",
-            "(+ (+ (+ 1 2) 3) (* (+ 4 5) 6))",
-            "(|| (&& (!= 1 0) (<= 3 3)) (> 3 2))",
+            "(:= a (:= b (+ (- ((1) (.add 3))) (/ (* 1 6) 2))))",
+            "(:= a (= (.x b) (+ (+ (+ 1 2) 3) (* (+ 4 5) 6))))",
+            "(= a (:= b (|| (&& (!= 1 0) (<= 3 3)) (> 3 2))))",
         ];
         let mut parser = Parser::new(question.as_bytes());
 
         for answer in answers {
             let result = parser.next_expression(true).unwrap().unwrap().to_string();
             assert_eq!(answer, result);
+            parser.skip_seperator().unwrap();
         }
     }
 }

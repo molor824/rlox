@@ -1,6 +1,5 @@
 #![allow(clippy::len_without_is_empty)]
 
-mod assignment;
 mod binary;
 mod primary;
 mod primitive;
@@ -15,8 +14,6 @@ use std::{
 };
 
 use crate::ast::{
-    assignment::Assignee,
-    binary::BinaryOperator,
     primary::Element,
     primitive::{Number, SourceSpan},
     unary::{PostfixOperator, PrefixOperator},
@@ -114,7 +111,7 @@ impl<R: BufRead> Parser<R> {
     // Is used for recursive expressions
     // NOTE: Update when the top most expression implementation changes
     pub fn next_expression(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_assignment(skip_newline)
+        self.next_binary(skip_newline)
     }
 }
 
@@ -218,12 +215,8 @@ pub enum Expression {
     },
     Binary {
         left_operand: Box<Expression>,
-        operator: BinaryOperator,
+        operator: SpanOf<&'static str>,
         right_operand: Box<Expression>,
-    },
-    Assign {
-        assignee: Assignee,
-        assigner: Box<Expression>,
     },
 }
 impl fmt::Display for Expression {
@@ -248,8 +241,7 @@ impl fmt::Display for Expression {
                 left_operand,
                 operator,
                 right_operand,
-            } => write!(f, "({} {} {})", operator, left_operand, right_operand),
-            Self::Assign { assignee, assigner } => write!(f, "(= {} {})", assignee, assigner),
+            } => write!(f, "({} {} {})", operator.1, left_operand, right_operand),
         }
     }
 }
@@ -270,8 +262,7 @@ impl GetSpan for Expression {
             } => left_operand
                 .span()
                 .concat(right_operand.span())
-                .concat(operator.span()),
-            Self::Assign { assignee, assigner } => assignee.span().concat(assigner.span()),
+                .concat(operator.0),
         }
     }
 }
