@@ -1,4 +1,4 @@
-use crate::ast::*;
+use crate::ast::{expression::Expression, *};
 
 impl<R: BufRead> Parser<R> {
     fn next_element(&mut self, skip_newline: bool) -> Result<Option<Element>> {
@@ -64,7 +64,7 @@ impl<R: BufRead> Parser<R> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Element {
     Regular(Expression),
     Unpacking(SpanOf<Expression>),

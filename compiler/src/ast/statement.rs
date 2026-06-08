@@ -1,18 +1,21 @@
-use crate::ast::*;
+use crate::ast::{expression::Expression, *};
 
 #[derive(Debug)]
 pub enum Statement {
     Expression(Box<Expression>),
     If {
+        span: Span,
         condition: Box<Expression>,
         met_block: Vec<Statement>,
-        else_block: Vec<Statement>,
+        else_block: Option<Vec<Statement>>,
     },
     While {
+        span: Span,
         condition: Box<Expression>,
         block: Vec<Statement>,
     },
     For {
+        span: Span,
         initial: Option<Box<Expression>>,
         condition: Option<Box<Expression>>,
         repeat: Option<Box<Expression>>,
@@ -20,29 +23,31 @@ pub enum Statement {
     },
 }
 
+pub fn print_indent(statements: &[Statement], f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    for statement in statements {
+        writeln!(f, ". {}", statement.to_string().replace("\n", "\n. "))?;
+    }
+    Ok(())
+}
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn print_indent(statements: &[Statement], f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            for statement in statements {
-                writeln!(f, ". {}", statement.to_string().replace("\n", "\n. "))?;
-            }
-            Ok(())
-        }
-
         match self {
-            Self::Expression(expr) => write!(f, "{expr};"),
+            Self::Expression(expr) => write!(f, "{expr}"),
             Self::If {
                 condition,
                 met_block,
                 else_block,
+                ..
             } => {
                 writeln!(f, "if {condition} then")?;
                 print_indent(met_block, f)?;
-                writeln!(f, "else")?;
-                print_indent(else_block, f)?;
+                if let Some(else_block) = else_block {
+                    writeln!(f, "else")?;
+                    print_indent(else_block, f)?;
+                }
                 write!(f, "end")
             }
-            Self::While { condition, block } => {
+            Self::While { condition, block, .. } => {
                 writeln!(f, "while {condition} do")?;
                 print_indent(block, f)?;
                 write!(f, "end")
@@ -52,6 +57,7 @@ impl fmt::Display for Statement {
                 condition,
                 repeat,
                 block,
+                ..
             } => {
                 write!(f, "for ")?;
                 if let Some(i) = initial {
@@ -67,6 +73,16 @@ impl fmt::Display for Statement {
                 print_indent(block, f)?;
                 write!(f, "end")
             }
+        }
+    }
+}
+impl GetSpan for Statement {
+    fn span(&self) -> Span {
+        match self {
+            Self::Expression(expr) => expr.span(),
+            Self::For { span, .. } => *span,
+            Self::While { span, .. } => *span,
+            Self::If { span, .. } => *span,
         }
     }
 }
@@ -95,7 +111,7 @@ impl<R: BufRead> Parser<R> {
         Ok((statements, self.next_terminators()?))
     }
 
-    fn next_do_block(&mut self) -> Result<Option<Vec<Statement>>> {
+    pub fn next_do_block(&mut self) -> Result<Option<SpanOf<Vec<Statement>>>> {
         let Some(do_keyword) = self.next_keyword("do", true)? else {
             return Ok(None);
         };
@@ -105,7 +121,7 @@ impl<R: BufRead> Parser<R> {
         if &*terminator.get_str() != "end" {
             return Err(self.error(terminator.0, ErrorKind::ExpectedEnd));
         }
-        Ok(Some(statements))
+        Ok(Some(SpanOf(do_keyword.0.concat(terminator.0), statements)))
     }
 
     fn next_for_statement(&mut self) -> Result<Option<Statement>> {
@@ -148,7 +164,8 @@ impl<R: BufRead> Parser<R> {
             initial: initial.map(Box::new),
             condition: condition.map(Box::new),
             repeat: repeat.map(Box::new),
-            block,
+            block: block.1,
+            span: for_keyword.0.concat(block.0),
         }))
     }
 
@@ -164,7 +181,8 @@ impl<R: BufRead> Parser<R> {
         };
         Ok(Some(Statement::While {
             condition: condition.into(),
-            block,
+            block: block.1,
+            span: while_keyword.0.concat(block.0),
         }))
     }
 
@@ -182,21 +200,24 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(if_keyword.0.concat(then_keyword.0), ErrorKind::ExpectedElse));
         };
 
+        let span = if_keyword.0.concat(terminator.0);
         let keyword = terminator.get_str();
 
         match &*keyword {
             "end" => Ok(Some(Statement::If {
+                span,
                 condition: condition.into(),
                 met_block,
-                else_block: vec![],
+                else_block: None,
             })),
             "else" => {
                 drop(keyword); // self.next_if_statement will borrow the RefCell
                 if let Some(elif) = self.next_if_statement()? {
                     Ok(Some(Statement::If {
+                        span,
                         condition: condition.into(),
                         met_block,
-                        else_block: vec![elif],
+                        else_block: Some(vec![elif]),
                     }))
                 } else {
                     let (else_block, Some(else_terminator)) = self.next_block()? else {
@@ -206,9 +227,10 @@ impl<R: BufRead> Parser<R> {
                         return Err(self.error(else_terminator.0, ErrorKind::ExpectedEnd));
                     }
                     Ok(Some(Statement::If {
+                        span,
                         condition: condition.into(),
                         met_block,
-                        else_block,
+                        else_block: Some(else_block),
                     }))
                 }
             }
@@ -218,7 +240,7 @@ impl<R: BufRead> Parser<R> {
 
     fn next_expr_statement(&mut self) -> Result<Option<Statement>> {
         self.next_expression(false)
-            .map(|expr| expr.map(|expr| Statement::Expression(expr.into())))
+            .map(|expr| expr.map(|expr| Statement::Expression(Box::new(expr))))
     }
 
     pub fn next_statement(&mut self) -> Result<Option<Statement>> {
@@ -251,12 +273,11 @@ mod tests {
         else print("Semicolon is necessary"); print("In this case!") end
         "#;
         let answer = r#"if true then
-. (("Hello, world!") print);
-. (("Semicolon is unnecessary, although it is optional!") print);
+. (("Hello, world!") print)
+. (("Semicolon is unnecessary, although it is optional!") print)
 else
 . if false then
-. . (("Inlining!") print);
-. else
+. . (("Inlining!") print)
 . end
 end"#;
 

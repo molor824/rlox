@@ -1,8 +1,10 @@
+use crate::ast::expression::Expression;
+
 use super::*;
 
 impl<R: BufRead> Parser<R> {
     pub fn next_binary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_assignment(skip_newline)
+        self.next_logical_or(skip_newline)
     }
     fn next_binary_operator(
         &mut self,
@@ -49,38 +51,6 @@ impl<R: BufRead> Parser<R> {
                 operator: op,
                 right_operand: Box::new(right_operand),
             };
-        }
-        Ok(Some(expr))
-    }
-    fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        let mut chain = vec![];
-        let lower = |parser: &mut Self| parser.next_logical_or(skip_newline);
-
-        loop {
-            let prev = self.clone();
-            let Ok(Some(assignee)) = lower(self) else {
-                *self = prev;
-                break;
-            };
-            let Some(equal) = self.next_symbols([":=", "="], skip_newline)? else {
-                *self = prev;
-                break;
-            };
-            chain.push((assignee, equal));
-        }
-        let Some(mut expr) = lower(self)? else {
-            if let Some((_, equal)) = chain.last() {
-                return Err(self.error(equal.0, ErrorKind::ExpectedExpr));
-            } else {
-                return Ok(None);
-            }
-        };
-        while let Some((assignee, operator)) = chain.pop() {
-            expr = Expression::Binary {
-                left_operand: Box::new(assignee),
-                right_operand: Box::new(expr),
-                operator,
-            }
         }
         Ok(Some(expr))
     }
@@ -189,11 +159,11 @@ mod tests {
     #[test]
     fn parse_binary() {
         let question =
-            "a := b := -(3).add(1) + 1 * 6 / 2; a := b.x = 1 + 2 + 3\n+ (\t4 + 5\t) * 6; a = b := 1!=0 and 3 <= 3 or 3>2";
+            "-(3).add(1) + 1 * 6 / 2; 1 + 2 + 3\n+ (\t4 + 5\t) * 6; 1!=0 and 3 <= 3 or 3>2";
         let answers = [
-            "(:= a (:= b (+ (- ((1) (.add 3))) (/ (* 1 6) 2))))",
-            "(:= a (= (.x b) (+ (+ (+ 1 2) 3) (* (+ 4 5) 6))))",
-            "(= a (:= b (|| (&& (!= 1 0) (<= 3 3)) (> 3 2))))",
+            "(+ (- ((1) (.add 3))) (/ (* 1 6) 2))",
+            "(+ (+ (+ 1 2) 3) (* (+ 4 5) 6))",
+            "(|| (&& (!= 1 0) (<= 3 3)) (> 3 2))",
         ];
         let mut parser = Parser::new(question.as_bytes());
 

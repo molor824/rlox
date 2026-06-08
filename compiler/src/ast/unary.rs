@@ -1,3 +1,5 @@
+use crate::ast::expression::Expression;
+
 use super::*;
 
 impl<R: BufRead> Parser<R> {
@@ -87,7 +89,7 @@ impl GetSpan for PrefixOperator {
         self.0 .0
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PostfixOperator {
     Property(SourceSpan),
     Call(SpanOf<Vec<Element>>),

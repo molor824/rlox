@@ -2,7 +2,7 @@ use std::cell::Ref;
 
 use num_bigint::BigInt;
 
-use crate::ast::*;
+use crate::ast::{expression::Expression, *};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Integer {
