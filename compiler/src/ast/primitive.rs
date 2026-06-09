@@ -136,11 +136,11 @@ impl<R: BufRead> Parser<R> {
     }
     fn skip_comments(&mut self) -> Result<bool> {
         let mut skipped = false;
-        if self.next_if(|ch| ch.1 == '#')?.is_some() {
+        if self.next_sequence("--")?.is_some() {
             skipped = true;
-            if self.next_if(|ch| ch.1 == '{')?.is_some() {
+            if self.next_sequence("[[")?.is_some() {
                 loop {
-                    if self.next_sequence("}#")?.is_some() || self.next_ch()?.is_none() {
+                    if self.next_sequence("]]")?.is_some() || self.next_ch()?.is_none() {
                         break;
                     }
                 }
@@ -552,7 +552,7 @@ mod tests {
     fn primitive_parsing() {
         let mut parser = Parser::new(
             r#"ident 1 10 0xdEaD00 0o123123
-# Must ignore comment!
+-- Must ignore comment!
 0b1011_1101
             "string" "escape\nstring" "string
 with newline"
@@ -561,9 +561,9 @@ with newline"
 r"should ignore this escape!\n"
 r("let me "quote" this!")
 r(("let me ("bracket and quote") this!"))
-#{ Must be ignored!
+--[[ Must be ignored!
 "comment, instead of string"
-        }#
+        ]]
         x1'
         _x2_''
         __x3__'''
@@ -577,7 +577,7 @@ r(("let me ("bracket and quote") this!"))
         0xde.adP+beef
         0b1010e+1010
         0o77.E-71"\u4f60\U0000597d"
-#{ Unfinished comment, cuz why not
+--[[Unfinished comment, cuz why not
 "#
             .as_bytes(),
         );

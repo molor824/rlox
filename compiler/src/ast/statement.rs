@@ -267,7 +267,7 @@ mod tests {
             print("Hello, world!");
             print("Semicolon is unnecessary, although it is optional!")
 
-            ;;;;; # Some weird fuck decided to spam semicolons, but it's technically valid code anyways.
+            ;;;;; -- Some weird fuck decided to spam semicolons, but it's technically valid code anyways.
 
         else if false then print("Inlining!") end
         else print("Semicolon is necessary"); print("In this case!") end

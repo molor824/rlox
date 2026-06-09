@@ -195,7 +195,6 @@ impl fmt::Display for Error {
     }
 }
 
-
 pub trait GetSpan {
     fn span(&self) -> Span;
 }

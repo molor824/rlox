@@ -140,7 +140,7 @@ mod tests {
     }
     #[test]
     fn parse_unary() {
-        let question = "\t-- -  not~ ~ not  \t\t !not a . b . c (    d , e ) [ f  ] ";
+        let question = "\t- - -  not~ ~ not  \t\t !not a . b . c (    d , e ) [ f  ] ";
         let answer = "(- (- (- (! (~ (~ (! (! (! ([f] ((d,e) (.c (.b a)))))))))))))";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser.next_unary(false).unwrap().unwrap().to_string();
