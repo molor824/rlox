@@ -1,27 +1,40 @@
 use crate::ast::{
     expression::Expression,
-    statement::Statement,
     *,
 };
 
 #[derive(Debug)]
-pub enum Assigner {
-    Declare(Box<Expression>),
-    Reassign(Box<Expression>),
-    Block(SpanOf<Vec<Statement>>),
+pub enum Assignee {
+    Ident(SourceSpan),
+    Property {
+        property: SourceSpan,
+        operand: Box<Expression>,
+    },
+    Index {
+        arg: SpanOf<Box<Expression>>,
+        operand: Box<Expression>,
+    }
 }
-impl GetSpan for Assigner {
-    fn span(&self) -> Span {
+
+impl fmt::Display for Assignee {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Block(block) => block.0,
-            Self::Declare(expr) => expr.span(),
-            Self::Reassign(expr) => expr.span(),
+            Self::Ident(ident) => write!(f, "{ident}"),
+            Self::Property { property, operand } => write!(f, "(.{property} {operand})"),
+            Self::Index { arg, operand } => write!(f, "([{}] {operand})", arg.1),
         }
     }
 }
 
-const DECLARE: &str = ":=";
-const REASSIGN: &str = "=";
+impl GetSpan for Assignee {
+    fn span(&self) -> Span {
+        match self {
+            Self::Ident(ident) => ident.0,
+            Self::Property { property, operand } => property.0.concat(operand.span()),
+            Self::Index { arg, operand } => arg.0.concat(operand.span()),
+        }
+    }
+}
 
 impl<R: BufRead> Parser<R> {
     pub fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
@@ -34,7 +47,8 @@ impl<R: BufRead> Parser<R> {
                 *self = prev;
                 break;
             };
-            let Some(equal) = self.next_symbols([DECLARE, REASSIGN], skip_newline)? else {
+
+            let Some(equal) = self.next_symbol("=", skip_newline)? else {
                 *self = prev;
                 break;
             };
@@ -42,25 +56,29 @@ impl<R: BufRead> Parser<R> {
         }
         let Some(mut expr) = lower(self)? else {
             if let Some((_, equal)) = chain.last() {
-                return Err(self.error(equal.0, ErrorKind::ExpectedExpr));
+                return Err(self.error(*equal, ErrorKind::ExpectedExpr));
             } else {
                 return Ok(None);
             }
         };
-        if let Some(block) = self.next_do_block()? {
-            expr = Expression::Assign {
-                assignee: Box::new(expr),
-                assigner: Assigner::Block(block),
-            };
-        }
-        while let Some((assignee, operator)) = chain.pop() {
-            expr = Expression::Assign {
-                assignee: Box::new(assignee),
-                assigner: match operator.1 {
-                    DECLARE => Assigner::Declare(Box::new(expr)),
-                    REASSIGN => Assigner::Reassign(Box::new(expr)),
-                    _ => unreachable!(),
+        while let Some((assignee_expr, _)) = chain.pop() {
+            let assignee_span = assignee_expr.span();
+            let invalid_assignee_error = |parser: &mut Self| Err(
+                parser.error(assignee_span, ErrorKind::InvalidAssignee)
+            );
+            let assignee = match assignee_expr {
+                Expression::Ident(ident) => Assignee::Ident(ident),
+                Expression::Postfix { operator, operand } => match operator {
+                    PostfixOperator::Property(property) => Assignee::Property { property, operand },
+                    PostfixOperator::Index(arg) => Assignee::Index { arg, operand },
+                    _ => return invalid_assignee_error(self),
                 },
+                _ => return invalid_assignee_error(self),
+            };
+
+            expr = Expression::Assign {
+                assignee,
+                assigner: Box::new(expr),
             };
         }
         Ok(Some(expr))
@@ -74,17 +92,13 @@ mod tests {
     #[test]
     fn parse_assignment() {
         let question = r"
-        a := b
-        a.x = b(x, y) := 2
-        a[0] = b[1] = c[2] + d[3] + e[4]
-        b := a(x, y, z) do
-            length := x + y + z
-        end";
+        a = b
+        a.x = b.y = 2
+        a[0] = b[1] = c[2] + d[3] + e[4]";
         let answers = [
-            "(:= a b)",
-            "(= (.x a) (:= ((x,y) b) 2))",
+            "(= a b)",
+            "(= (.x a) (= (.y b) 2))",
             "(= ([0] a) (= ([1] b) (+ (+ ([2] c) ([3] d)) ([4] e))))",
-            "(:= b (= ((x,y,z) a) do\n. (:= length (+ (+ x y) z))\nend))",
         ];
 
         let mut parser = Parser::new(question.as_bytes());

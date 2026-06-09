@@ -1,4 +1,4 @@
-use crate::ast::{assignment::Assigner, statement::print_indent, *};
+use crate::ast::{assignment::Assignee, *};
 
 impl<R: BufRead> Parser<R> {
     // Is used for recursive expressions
@@ -29,8 +29,8 @@ pub enum Expression {
         right_operand: Box<Expression>,
     },
     Assign {
-        assignee: Box<Expression>,
-        assigner: Assigner,
+        assignee: Assignee,
+        assigner: Box<Expression>,
     },
 }
 impl fmt::Display for Expression {
@@ -56,15 +56,7 @@ impl fmt::Display for Expression {
                 operator,
                 right_operand,
             } => write!(f, "({} {} {})", operator.1, left_operand, right_operand),
-            Self::Assign { assignee, assigner } => match assigner {
-                Assigner::Block(block) => {
-                    writeln!(f, "(= {assignee} do")?;
-                    print_indent(&block.1, f)?;
-                    write!(f, "end)")
-                },
-                Assigner::Declare(expr) => write!(f, "(:= {assignee} {expr})"),
-                Assigner::Reassign(expr) => write!(f, "(= {assignee} {expr})"),
-            },
+            Self::Assign { assignee, assigner } => write!(f, "(= {assignee} {assigner})"),
         }
     }
 }
