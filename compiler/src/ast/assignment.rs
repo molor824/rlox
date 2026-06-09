@@ -20,8 +20,8 @@ impl fmt::Display for Assignee {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ident(ident) => write!(f, "{ident}"),
-            Self::Property { ident, operand } => write!(f, "(.{ident} {operand})"),
-            Self::Index { arg, operand } => write!(f, "([{}] {operand})", arg.1),
+            Self::Property { ident, operand } => write!(f, "({operand}).{ident}"),
+            Self::Index { arg, operand } => write!(f, "({operand})[{}]", arg.1),
         }
     }
 }
@@ -96,9 +96,9 @@ mod tests {
         a.x = b.y = 2
         a[0] = b[1] = c[2] + d[3] + e[4]";
         let answers = [
-            "(= a b)",
-            "(= (.x a) (= (.y b) 2))",
-            "(= ([0] a) (= ([1] b) (+ (+ ([2] c) ([3] d)) ([4] e))))",
+            "(a) = (b)",
+            "((a).x) = (((b).y) = (2))",
+            "((a)[0]) = (((b)[1]) = ((((c)[2]) + ((d)[3])) + ((e)[4])))",
         ];
 
         let mut parser = Parser::new(question.as_bytes());

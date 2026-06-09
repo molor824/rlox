@@ -49,14 +49,14 @@ impl fmt::Display for Expression {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            Self::Postfix { operand, operator } => write!(f, "({} {})", operator, operand),
-            Self::Prefix { operator, operand } => write!(f, "({} {})", operator, operand),
+            Self::Postfix { operand, operator } => write!(f, "({operand}){operator}"),
+            Self::Prefix { operator, operand } => write!(f, "{operator}({operand})"),
             Self::Binary {
                 left_operand,
                 operator,
                 right_operand,
-            } => write!(f, "({} {} {})", operator.1, left_operand, right_operand),
-            Self::Assign { assignee, assigner } => write!(f, "(= {assignee} {assigner})"),
+            } => write!(f, "({left_operand}) {} ({right_operand})", operator.1),
+            Self::Assign { assignee, assigner } => write!(f, "({assignee}) = ({assigner})"),
         }
     }
 }

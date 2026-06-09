@@ -273,11 +273,11 @@ mod tests {
         else print("Semicolon is necessary"); print("In this case!") end
         "#;
         let answer = r#"if true then
-. (("Hello, world!") print)
-. (("Semicolon is unnecessary, although it is optional!") print)
+. (print)("Hello, world!")
+. (print)("Semicolon is unnecessary, although it is optional!")
 else
 . if false then
-. . (("Inlining!") print)
+. . (print)("Inlining!")
 . end
 end"#;
 
