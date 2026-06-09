@@ -7,7 +7,7 @@ use crate::ast::{
 pub enum Assignee {
     Ident(SourceSpan),
     Property {
-        property: SourceSpan,
+        ident: SourceSpan,
         operand: Box<Expression>,
     },
     Index {
@@ -20,7 +20,7 @@ impl fmt::Display for Assignee {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ident(ident) => write!(f, "{ident}"),
-            Self::Property { property, operand } => write!(f, "(.{property} {operand})"),
+            Self::Property { ident, operand } => write!(f, "(.{ident} {operand})"),
             Self::Index { arg, operand } => write!(f, "([{}] {operand})", arg.1),
         }
     }
@@ -30,7 +30,7 @@ impl GetSpan for Assignee {
     fn span(&self) -> Span {
         match self {
             Self::Ident(ident) => ident.0,
-            Self::Property { property, operand } => property.0.concat(operand.span()),
+            Self::Property { ident, operand } => ident.0.concat(operand.span()),
             Self::Index { arg, operand } => arg.0.concat(operand.span()),
         }
     }
@@ -69,7 +69,7 @@ impl<R: BufRead> Parser<R> {
             let assignee = match assignee_expr {
                 Expression::Ident(ident) => Assignee::Ident(ident),
                 Expression::Postfix { operator, operand } => match operator {
-                    PostfixOperator::Property(property) => Assignee::Property { property, operand },
+                    PostfixOperator::Property(ident) => Assignee::Property { ident, operand },
                     PostfixOperator::Index(arg) => Assignee::Index { arg, operand },
                     _ => return invalid_assignee_error(self),
                 },

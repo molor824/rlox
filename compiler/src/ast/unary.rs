@@ -10,12 +10,16 @@ impl<R: BufRead> Parser<R> {
         let mut expr = operand;
 
         loop {
-            let operator = if let Some(dot) = self.next_symbol(".", skip_newline)? {
-                // Property
+            let operator = if let Some(dot) = self.next_symbols([".", ":"], skip_newline)? {
+                // Property, method
                 let Some(ident) = self.next_ident(skip_newline)? else {
-                    return Err(self.error(dot, ErrorKind::ExpectedIdent));
+                    return Err(self.error(dot.0, ErrorKind::ExpectedIdent));
                 };
-                PostfixOperator::Property(ident)
+                match dot.1 {
+                    "." => PostfixOperator::Property(ident),
+                    ":" => PostfixOperator::Method(ident),
+                    _ => unreachable!()
+                }
             } else if let Some(left) = self.next_symbol("(", skip_newline)? {
                 // Call
                 let elements = self
@@ -92,13 +96,14 @@ impl GetSpan for PrefixOperator {
 #[derive(Debug)]
 pub enum PostfixOperator {
     Property(SourceSpan),
+    Method(SourceSpan),
     Call(SpanOf<Vec<Element>>),
     Index(SpanOf<Box<Expression>>),
 }
 impl fmt::Display for PostfixOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Property(property) => write!(f, ".{}", property),
+            Self::Property(property) => write!(f, ".{property}"),
             Self::Call(args) => write!(
                 f,
                 "({})",
@@ -108,6 +113,7 @@ impl fmt::Display for PostfixOperator {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
+            Self::Method(method) => write!(f, ":{method}"),
             Self::Index(args) => write!(f, "[{}]", args.1),
         }
     }
@@ -118,6 +124,7 @@ impl GetSpan for PostfixOperator {
             Self::Property(p) => p.0,
             Self::Call(c) => c.0,
             Self::Index(i) => i.0,
+            Self::Method(m) => m.0,
         }
     }
 }
@@ -128,8 +135,8 @@ mod tests {
 
     #[test]
     fn parse_postfix() {
-        let question = "a.b.c[1](2) (3 , 4)[5] (*a)";
-        let answer = "((*a) ([5] ((3,4) ((2) ([1] (.c (.b a)))))))";
+        let question = "a.b.c[1](2) (3 , 4)[5] (*a):map(a.b:foo())";
+        let answer = "(((() (:foo (.b a)))) (:map ((*a) ([5] ((3,4) ((2) ([1] (.c (.b a)))))))))";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser
             .next_postfix_operators(false)
