@@ -132,6 +132,10 @@ pub enum ErrorKind {
     ExpectedRightParen,
     #[error("Expected `]`")]
     ExpectedRightSquare,
+    #[error("Expected `}}`")]
+    ExpectedRightCurly,
+    #[error("Expected `:`")]
+    ExpectedColon,
     #[error("Cannot use unpacking operation here")]
     UnexpectedUnpacking,
     #[error("Expected identifier")]

@@ -18,14 +18,11 @@ impl<R: BufRead> Parser<R> {
                 match dot.1 {
                     "." => PostfixOperator::Property(ident),
                     ":" => PostfixOperator::Method(ident),
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 }
             } else if let Some(left) = self.next_symbol("(", skip_newline)? {
                 // Call
-                let elements = self
-                    .next_elements(true)?
-                    .map(|expr| expr.1)
-                    .unwrap_or(vec![]);
+                let elements = self.next_elements(true)?;
                 let Some(right) = self.next_symbol(")", true)? else {
                     return Err(self.error(left, ErrorKind::ExpectedRightParen));
                 };

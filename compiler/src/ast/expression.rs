@@ -1,4 +1,4 @@
-use crate::ast::{assignment::Assignee, *};
+use crate::ast::{assignment::Assignee, primary::Pair, *};
 
 impl<R: BufRead> Parser<R> {
     // Is used for recursive expressions
@@ -14,6 +14,7 @@ pub enum Expression {
     String(SpanOf<String>),
     Number(SpanOf<Number>),
     Array(SpanOf<Vec<Element>>),
+    Object(SpanOf<Vec<Pair>>),
     Boolean(SpanOf<bool>),
     Postfix {
         operator: PostfixOperator,
@@ -45,10 +46,11 @@ impl fmt::Display for Expression {
                 "[{}]",
                 arr.1
                     .iter()
-                    .map(|expr| expr.to_string())
+                    .map(|elem| elem.to_string())
                     .collect::<Vec<_>>()
-                    .join(",")
+                    .join(", ")
             ),
+            Self::Object(obj) => write!(f, "{{{}}}", obj.1.iter().map(|pair| pair.to_string()).collect::<Vec<_>>().join(", ")),
             Self::Postfix { operand, operator } => write!(f, "({operand}){operator}"),
             Self::Prefix { operator, operand } => write!(f, "{operator}({operand})"),
             Self::Binary {
@@ -68,6 +70,7 @@ impl GetSpan for Expression {
             Self::String(string) => string.0,
             Self::Boolean(boolean) => boolean.0,
             Self::Array(array) => array.0,
+            Self::Object(object) => object.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
             Self::Prefix { operator, operand } => operator.span().concat(operand.span()),
             Self::Binary {
