@@ -7,17 +7,15 @@ impl<R: BufRead> Parser<R> {
         };
         Ok(self
             .next_expression(skip_newline)?
-            .map(|expr| Element::Unpacking(SpanOf(star.concat(expr.span()), expr))))
+            .map(|expr| Element::Unpack(SpanOf(star.concat(expr.span()), expr))))
     }
     pub fn next_elements(&mut self, skip_newline: bool) -> Result<Vec<Element>> {
-        let Some(mut elements) = self.next_element(skip_newline)?.map(|expr| vec![expr]) else {
-            return Ok(vec![]);
-        };
-        while self.next_symbol(",", skip_newline)?.is_some() {
-            let Some(element) = self.next_element(skip_newline)? else {
-                return Ok(elements);
-            };
+        let mut elements = vec![];
+        while let Some(element) = self.next_element(skip_newline)? {
             elements.push(element);
+            if self.next_symbol(",", skip_newline)?.is_none() {
+                break;
+            }
         }
         Ok(elements)
     }
@@ -67,6 +65,14 @@ impl<R: BufRead> Parser<R> {
                 SpanOf(start.concat(end), Box::new(expr)),
                 Box::new(value),
             )))
+        } else if let Some(star) = self.next_symbol("*", true)? {
+            let Some(expr) = self.next_expression(true)? else {
+                return Err(self.error(star, ErrorKind::ExpectedExpr));
+            };
+            Ok(Some(Pair::Unpack(SpanOf(
+                star.concat(expr.span()),
+                Box::new(expr),
+            ))))
         } else if let Some(key) = self.next_ident(true)? {
             let value = next_pair_value(self)?.unwrap_or(Expression::Ident(key.clone()));
             Ok(Some(Pair::Ident(key, Box::new(value))))
@@ -108,21 +114,13 @@ impl<R: BufRead> Parser<R> {
 #[derive(Debug)]
 pub enum Element {
     Regular(Expression),
-    Unpacking(SpanOf<Expression>),
+    Unpack(SpanOf<Expression>),
 }
 impl fmt::Display for Element {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Regular(expr) => write!(f, "{}", expr),
-            Self::Unpacking(unpacking) => write!(f, "*{}", unpacking.1),
-        }
-    }
-}
-impl GetSpan for Element {
-    fn span(&self) -> Span {
-        match self {
-            Self::Regular(expr) => expr.span(),
-            Self::Unpacking(unpacking) => unpacking.0,
+            Self::Unpack(unpacking) => write!(f, "*{}", unpacking.1),
         }
     }
 }
@@ -131,12 +129,14 @@ impl GetSpan for Element {
 pub enum Pair {
     Ident(SourceSpan, Box<Expression>),
     Index(SpanOf<Box<Expression>>, Box<Expression>),
+    Unpack(SpanOf<Box<Expression>>),
 }
 impl fmt::Display for Pair {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ident(ident, expr) => write!(f, "{ident}: {expr}"),
             Self::Index(key, value) => write!(f, "[{}]: {}", key.1, value),
+            Self::Unpack(expr) => write!(f, "*{}", expr.1),
         }
     }
 }
@@ -169,24 +169,24 @@ mod tests {
     fn parse_primary() {
         let mut parser = Parser::new(
             r#"[1, 2, 3]
-            [4, 
+            [4,
             [5, 6],
             ]
             [1, 2, *a, *b, 3]
-            { a: 1, 
+            { *obj, a: 1,
              b: 2}
-            {x,y,z,}
+            {x,y,z, *{x: 2, y: 3}}
             { [0]: 0, [1]: 3,
-                ["test"]: "no" ,}"#
+                ["test"]: "no", ident: x, *unpack ,}"#
                 .as_bytes(),
         );
         let answers = [
             "[1, 2, 3]",
             "[4, [5, 6]]",
             "[1, 2, *a, *b, 3]",
-            "{a: 1, b: 2}",
-            "{x: x, y: y, z: z}",
-            "{[0]: 0, [1]: 3, [\"test\"]: \"no\"}",
+            "{*obj, a: 1, b: 2}",
+            "{x: x, y: y, z: z, *{x: 2, y: 3}}",
+            "{[0]: 0, [1]: 3, [\"test\"]: \"no\", ident: x, *unpack}",
         ];
         for answer in answers {
             parser.skip_seperator().unwrap();
