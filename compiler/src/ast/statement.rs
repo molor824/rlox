@@ -1,4 +1,4 @@
-use crate::ast::{expression::Expression, *};
+use crate::ast::{expression::*, *};
 
 #[derive(Debug)]
 pub enum Statement {
@@ -47,7 +47,9 @@ impl fmt::Display for Statement {
                 }
                 write!(f, "end")
             }
-            Self::While { condition, block, .. } => {
+            Self::While {
+                condition, block, ..
+            } => {
                 writeln!(f, "while {condition} do")?;
                 print_indent(block, f)?;
                 write!(f, "end")
@@ -111,8 +113,8 @@ impl<R: BufRead> Parser<R> {
         Ok((statements, self.next_terminators()?))
     }
 
-    pub fn next_do_block(&mut self) -> Result<Option<SpanOf<Vec<Statement>>>> {
-        let Some(do_keyword) = self.next_keyword("do", true)? else {
+    pub fn next_do_block(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Vec<Statement>>>> {
+        let Some(do_keyword) = self.next_keyword("do", skip_newline)? else {
             return Ok(None);
         };
         let (statements, Some(terminator)) = self.next_block()? else {
@@ -147,7 +149,7 @@ impl<R: BufRead> Parser<R> {
             }
             None => None,
         };
-        let Some(block) = self.next_do_block()? else {
+        let Some(block) = self.next_do_block(true)? else {
             let mut span = for_keyword.0;
             if let Some(expr) = initial {
                 span = span.concat(expr.span());
@@ -176,7 +178,7 @@ impl<R: BufRead> Parser<R> {
         let Some(condition) = self.next_expression(true)? else {
             return Err(self.error(while_keyword.0, ErrorKind::ExpectedExpr));
         };
-        let Some(block) = self.next_do_block()? else {
+        let Some(block) = self.next_do_block(true)? else {
             return Err(self.error(condition.span(), ErrorKind::ExpectedDoBlock));
         };
         Ok(Some(Statement::While {

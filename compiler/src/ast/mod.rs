@@ -1,11 +1,11 @@
 #![allow(clippy::len_without_is_empty)]
 
+mod assignment;
 mod binary;
+mod expression;
 mod primary;
 mod primitive;
 mod statement;
-mod assignment;
-mod expression;
 mod unary;
 
 use std::{
@@ -13,12 +13,6 @@ use std::{
     fmt,
     io::{self, BufRead},
     rc::Rc,
-};
-
-use crate::ast::{
-    primary::Element,
-    primitive::{Number, SourceSpan},
-    unary::{PostfixOperator, PrefixOperator},
 };
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -128,6 +122,8 @@ pub enum ErrorKind {
     InvalidUnicode,
     #[error("String literal unterminated")]
     UnterminatedString,
+    #[error("Expected `(`")]
+    ExpectedLeftParen,
     #[error("Expected `)`")]
     ExpectedRightParen,
     #[error("Expected `]`")]
@@ -154,6 +150,8 @@ pub enum ErrorKind {
     ExpectedDoBlock,
     #[error("Invalid expression behind `=` operator. Only variable, property and/or indexing is allowed.")]
     InvalidAssignee,
+    #[error("Expeced function body `=> [expr]` or `do ... end`")]
+    ExpectedFuncBody,
 }
 
 #[derive(thiserror::Error)]

@@ -1,4 +1,4 @@
-use crate::ast::{expression::Expression, *};
+use crate::ast::{expression::*, *};
 
 impl<R: BufRead> Parser<R> {
     fn next_element(&mut self, skip_newline: bool) -> Result<Option<Element>> {
@@ -61,21 +61,15 @@ impl<R: BufRead> Parser<R> {
             let Some(value) = next_pair_value(self)? else {
                 return Err(self.error(start.concat(end), ErrorKind::ExpectedColon));
             };
-            Ok(Some(Pair::Index(
-                SpanOf(start.concat(end), Box::new(expr)),
-                Box::new(value),
-            )))
+            Ok(Some(Pair::Index(SpanOf(start.concat(end), expr), value)))
         } else if let Some(star) = self.next_symbol("*", true)? {
             let Some(expr) = self.next_expression(true)? else {
                 return Err(self.error(star, ErrorKind::ExpectedExpr));
             };
-            Ok(Some(Pair::Unpack(SpanOf(
-                star.concat(expr.span()),
-                Box::new(expr),
-            ))))
+            Ok(Some(Pair::Unpack(SpanOf(star.concat(expr.span()), expr))))
         } else if let Some(key) = self.next_ident(true)? {
             let value = next_pair_value(self)?.unwrap_or(Expression::Ident(key.clone()));
-            Ok(Some(Pair::Ident(key, Box::new(value))))
+            Ok(Some(Pair::Ident(key, value)))
         } else {
             Ok(None)
         }
@@ -96,48 +90,83 @@ impl<R: BufRead> Parser<R> {
         };
         Ok(Some(Expression::Object(SpanOf(start.concat(end), pairs))))
     }
-    pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        Ok(Some(if let Some(tuple) = self.next_group(skip_newline)? {
-            tuple
-        } else if let Some(array) = self.next_array(skip_newline)? {
-            array
-        } else if let Some(object) = self.next_object(skip_newline)? {
-            object
-        } else if let Some(primitive) = self.next_primitive(skip_newline)? {
-            primitive
+    fn next_params(&mut self) -> Result<(Vec<SourceSpan>, Option<SpanOf<SourceSpan>>)> {
+        let mut params = vec![];
+        let mut variadic = None;
+
+        loop {
+            let star = self.next_symbol("*", true)?;
+            let Some(ident) = self.next_ident(true)? else {
+                match star {
+                    Some(star) => return Err(self.error(star, ErrorKind::ExpectedIdent)),
+                    None => break,
+                }
+            };
+            if let Some(star) = star {
+                variadic = Some(SpanOf(star, ident));
+                break;
+            } else {
+                params.push(ident);
+            }
+            if self.next_symbol(",", true)?.is_none() {
+                break;
+            }
+        }
+        Ok((params, variadic))
+    }
+    fn next_body(&mut self, skip_newline: bool) -> Result<Option<FunctionBody>> {
+        if let Some(arrow) = self.next_symbol("=>", skip_newline)? {
+            let Some(expr) = self.next_expression(skip_newline)? else {
+                return Err(self.error(arrow, ErrorKind::ExpectedExpr));
+            };
+            Ok(Some(FunctionBody::Expression(SpanOf(
+                arrow,
+                Box::new(expr),
+            ))))
+        } else if let Some(do_block) = self.next_do_block(skip_newline)? {
+            Ok(Some(FunctionBody::Block(do_block)))
         } else {
+            Ok(None)
+        }
+    }
+    fn next_closure(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let Some(fn_kwd) = self.next_keyword("fn", skip_newline)? else {
             return Ok(None);
+        };
+        let Some(paren_start) = self.next_symbol("(", skip_newline)? else {
+            return Err(self.error(fn_kwd.0, ErrorKind::ExpectedLeftParen));
+        };
+        let (params, variadic) = self.next_params()?;
+
+        let Some(paren_end) = self.next_symbol(")", true)? else {
+            return Err(self.error(paren_start, ErrorKind::ExpectedRightParen));
+        };
+
+        let Some(body) = self.next_body(skip_newline)? else {
+            return Err(self.error(fn_kwd.0.concat(paren_end), ErrorKind::ExpectedFuncBody));
+        };
+
+        Ok(Some(Expression::Closure {
+            fn_keyword: fn_kwd.0,
+            params,
+            variadic,
+            body,
         }))
     }
-}
-
-#[derive(Debug)]
-pub enum Element {
-    Regular(Expression),
-    Unpack(SpanOf<Expression>),
-}
-impl fmt::Display for Element {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Regular(expr) => write!(f, "{}", expr),
-            Self::Unpack(unpacking) => write!(f, "*{}", unpacking.1),
+    pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let methods = [
+            Self::next_closure,
+            Self::next_group,
+            Self::next_array,
+            Self::next_object,
+            Self::next_primitive,
+        ];
+        for method in methods {
+            if let Some(expr) = method(self, skip_newline)? {
+                return Ok(Some(expr));
+            }
         }
-    }
-}
-
-#[derive(Debug)]
-pub enum Pair {
-    Ident(SourceSpan, Box<Expression>),
-    Index(SpanOf<Box<Expression>>, Box<Expression>),
-    Unpack(SpanOf<Box<Expression>>),
-}
-impl fmt::Display for Pair {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ident(ident, expr) => write!(f, "{ident}: {expr}"),
-            Self::Index(key, value) => write!(f, "[{}]: {}", key.1, value),
-            Self::Unpack(expr) => write!(f, "*{}", expr.1),
-        }
+        Ok(None)
     }
 }
 
@@ -146,35 +175,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_array() {
-        let mut parser = Parser::new(
-            "
-        [1,
-        [2,
-        3,
-        4],*[5]]
-        [[1, 2],
-        [[(3)],
-        [4,]], 5,]"
-                .as_bytes(),
-        );
-        let answers = ["[1, [2, 3, 4], *[5]]", "[[1, 2], [[3], [4]], 5]"];
-        for answer in answers {
-            parser.skip_seperator().unwrap();
-            let result = parser.next_array(false).unwrap().unwrap().to_string();
-            assert_eq!(result, answer);
-        }
-    }
-    #[test]
     fn parse_primary() {
         let mut parser = Parser::new(
             r#"[1, 2, 3]
             [4,
             [5, 6],
             ]
-            [1, 2, *a, *b, 3]
+            fn(a, b) => a + b
+            fn(a,b,  ) do
+                print(a + b)
+                print(a - b)
+            end
+            fn(a, b, *c) => [a, b, *c]
             { *obj, a: 1,
              b: 2}
+            [1, 2, *a, *b, 3]
             {x,y,z, *{x: 2, y: 3}}
             { [0]: 0, [1]: 3,
                 ["test"]: "no", ident: x, *unpack ,}"#
@@ -183,8 +198,11 @@ mod tests {
         let answers = [
             "[1, 2, 3]",
             "[4, [5, 6]]",
-            "[1, 2, *a, *b, 3]",
+            "fn(a, b) => (a) + (b)",
+            "fn(a, b) do\n. (print)((a) + (b))\n. (print)((a) - (b))\nend",
+            "fn(a, b, *c) => [a, b, *c]",
             "{*obj, a: 1, b: 2}",
+            "[1, 2, *a, *b, 3]",
             "{x: x, y: y, z: z, *{x: 2, y: 3}}",
             "{[0]: 0, [1]: 3, [\"test\"]: \"no\", ident: x, *unpack}",
         ];

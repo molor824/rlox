@@ -1,40 +1,4 @@
-use crate::ast::{
-    expression::Expression,
-    *,
-};
-
-#[derive(Debug)]
-pub enum Assignee {
-    Ident(SourceSpan),
-    Property {
-        ident: SourceSpan,
-        operand: Box<Expression>,
-    },
-    Index {
-        arg: SpanOf<Box<Expression>>,
-        operand: Box<Expression>,
-    }
-}
-
-impl fmt::Display for Assignee {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ident(ident) => write!(f, "{ident}"),
-            Self::Property { ident, operand } => write!(f, "({operand}).{ident}"),
-            Self::Index { arg, operand } => write!(f, "({operand})[{}]", arg.1),
-        }
-    }
-}
-
-impl GetSpan for Assignee {
-    fn span(&self) -> Span {
-        match self {
-            Self::Ident(ident) => ident.0,
-            Self::Property { ident, operand } => ident.0.concat(operand.span()),
-            Self::Index { arg, operand } => arg.0.concat(operand.span()),
-        }
-    }
-}
+use crate::ast::{expression::*, *};
 
 impl<R: BufRead> Parser<R> {
     pub fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
@@ -63,9 +27,8 @@ impl<R: BufRead> Parser<R> {
         };
         while let Some((assignee_expr, _)) = chain.pop() {
             let assignee_span = assignee_expr.span();
-            let invalid_assignee_error = |parser: &mut Self| Err(
-                parser.error(assignee_span, ErrorKind::InvalidAssignee)
-            );
+            let invalid_assignee_error =
+                |parser: &mut Self| Err(parser.error(assignee_span, ErrorKind::InvalidAssignee));
             let assignee = match assignee_expr {
                 Expression::Ident(ident) => Assignee::Ident(ident),
                 Expression::Postfix { operator, operand } => match operator {

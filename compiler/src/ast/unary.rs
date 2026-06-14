@@ -1,6 +1,4 @@
-use crate::ast::expression::Expression;
-
-use super::*;
+use crate::ast::{expression::*, *};
 
 impl<R: BufRead> Parser<R> {
     fn next_postfix_operators(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
@@ -75,54 +73,6 @@ impl<R: BufRead> Parser<R> {
     }
     pub fn next_unary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.next_prefix_operators(skip_newline)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PrefixOperator(pub SpanOf<&'static str>);
-impl fmt::Display for PrefixOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0 .1)
-    }
-}
-impl GetSpan for PrefixOperator {
-    fn span(&self) -> Span {
-        self.0 .0
-    }
-}
-#[derive(Debug)]
-pub enum PostfixOperator {
-    Property(SourceSpan),
-    Method(SourceSpan),
-    Call(SpanOf<Vec<Element>>),
-    Index(SpanOf<Box<Expression>>),
-}
-impl fmt::Display for PostfixOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Property(property) => write!(f, ".{property}"),
-            Self::Call(args) => write!(
-                f,
-                "({})",
-                args.1
-                    .iter()
-                    .map(|arg| arg.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-            Self::Method(method) => write!(f, ":{method}"),
-            Self::Index(args) => write!(f, "[{}]", args.1),
-        }
-    }
-}
-impl GetSpan for PostfixOperator {
-    fn span(&self) -> Span {
-        match self {
-            Self::Property(p) => p.0,
-            Self::Call(c) => c.0,
-            Self::Index(i) => i.0,
-            Self::Method(m) => m.0,
-        }
     }
 }
 
