@@ -23,6 +23,7 @@ pub enum Expression {
     Array(SpanOf<Vec<Element>>),
     Object(SpanOf<Vec<Pair>>),
     Boolean(SpanOf<bool>),
+    Nil(Span),
     Postfix {
         operator: PostfixOperator,
         operand: Box<Expression>,
@@ -54,6 +55,7 @@ impl fmt::Display for Expression {
             Self::Number(number) => write!(f, "{}", number.1),
             Self::String(string) => write!(f, "{:?}", string.1),
             Self::Boolean(boolean) => write!(f, "{}", boolean.1),
+            Self::Nil(_) => write!(f, "nil"),
             Self::Array(arr) => write!(
                 f,
                 "[{}]",
@@ -113,6 +115,7 @@ impl GetSpan for Expression {
             Self::Number(number) => number.0,
             Self::String(string) => string.0,
             Self::Boolean(boolean) => boolean.0,
+            Self::Nil(span) => *span,
             Self::Array(array) => array.0,
             Self::Object(object) => object.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),

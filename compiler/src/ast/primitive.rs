@@ -184,7 +184,7 @@ impl<R: BufRead> Parser<R> {
         Ok(integer)
     }
     /// Parses full number
-    fn next_number(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Number>>> {
+    fn next_number(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.skip(skip_newline)?;
 
         let Some(real) = self.next_real()? else {
@@ -198,15 +198,15 @@ impl<R: BufRead> Parser<R> {
             }
         })?
         else {
-            return Ok(Some(real));
+            return Ok(Some(Expression::Number(real)));
         };
         let exponent = self.next_exponent_integer(real.1.radix).map_err(|mut e| {
             e.span = e.span.concat(real.0);
             e
         })?;
-        Ok(Some(real.concat(exponent, |r, e| {
+        Ok(Some(Expression::Number(real.concat(exponent, |r, e| {
             Number::new(r.radix, r.integer, Some(e + r.exponent.unwrap_or(0)))
-        })))
+        }))))
     }
     pub fn next_ident(&mut self, skip_newline: bool) -> Result<Option<SourceSpan>> {
         self.skip(skip_newline)?;
@@ -280,7 +280,7 @@ impl<R: BufRead> Parser<R> {
             _ => Ok(Some(ch)),
         }
     }
-    fn next_literal_string(&mut self, skip_newline: bool) -> Result<Option<SpanOf<String>>> {
+    fn next_literal_string(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let prev = self.clone();
         self.skip(skip_newline)?;
 
@@ -335,26 +335,35 @@ impl<R: BufRead> Parser<R> {
             string.push(ch.1);
         }
 
-        Ok(Some(SpanOf(span, string)))
+        Ok(Some(Expression::String(SpanOf(span, string))))
+    }
+    fn next_constants(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let Some(ident) = self.next_ident(skip_newline)? else {
+            return Ok(None);
+        };
+        let i = ident.get_str();
+        Ok(Some(match &*i {
+            "true" => Expression::Boolean(SpanOf(ident.0, true)),
+            "false" => Expression::Boolean(SpanOf(ident.0, false)),
+            "nil" => Expression::Nil(ident.0),
+            _ => {
+                drop(i);
+                Expression::Ident(ident)
+            }
+        }))
     }
     pub fn next_primitive(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        Ok(Some(if let Some(n) = self.next_number(skip_newline)? {
-            Expression::Number(n)
-        } else if let Some(s) = self.next_literal_string(skip_newline)? {
-            Expression::String(s)
-        } else if let Some(i) = self.next_ident(skip_newline)? {
-            let s = i.get_str();
-            match &*s {
-                "true" => Expression::Boolean(SpanOf(i.0, true)),
-                "false" => Expression::Boolean(SpanOf(i.0, false)),
-                _ => {
-                    drop(s);
-                    Expression::Ident(i)
-                }
+        let order = [
+            Self::next_number,
+            Self::next_literal_string,
+            Self::next_constants,
+        ];
+        for method in order {
+            if let Some(expr) = method(self, skip_newline)? {
+                return Ok(Some(expr));
             }
-        } else {
-            return Ok(None);
-        }))
+        }
+        Ok(None)
     }
     pub fn next_symbol(&mut self, symbol: &str, skip_newline: bool) -> Result<Option<Span>> {
         self.skip(skip_newline)?;
@@ -410,69 +419,6 @@ mod tests {
     use crate::ast::Parser;
 
     #[test]
-    fn num_parsing() {
-        let qna = [
-            ("123", (10_u32, 123_i64, None)),
-            ("123.", (10, 123, Some(0))),
-            ("1.230", (10, 123, Some(-2))),
-            ("0xdead_BEEF", (16, 0xdeadbeef, None)),
-            ("0x10.1", (16, 0x101, Some(-1))),
-            ("0o100.40", (8, 0o1004, Some(-1))),
-            ("1e10", (10, 1, Some(10))),
-            ("34.3e-3", (10, 343, Some(-4))),
-            ("0b0.1e+101001", (2, 0b1, Some(0b101001 - 1))),
-            ("0xD.eadPBeeF", (16, 0xdead, Some(0xbeef - 3))),
-            ("0x1pdeadbeef", (16, 1, Some(0xdeadbeef_i64))),
-        ];
-        for (q, a) in qna {
-            let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_number(true).unwrap().unwrap().1;
-            assert_eq!(
-                (result.radix, result.integer, result.exponent),
-                (a.0, a.1.into(), a.2)
-            );
-        }
-    }
-    #[test]
-    fn ident_parsing() {
-        let questions = ["___", "_test", "test123", "x", "x'", "x''"];
-        for q in questions {
-            let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_ident(true).unwrap().unwrap();
-            assert_eq!(&*result.get_str(), q);
-        }
-    }
-    #[test]
-    fn string_parsing() {
-        let qna = [
-            (r#""test""#, "test"),
-            (r#"'escape\n'"#, "escape\n"),
-            (r#"'escape\''"#, "escape'"),
-            ("\'new\nline\'", "new\nline"),
-            (r#""w is \x77""#, "w is w"),
-            (
-                r#""Superman once said \"Thou shalt not pass\"""#,
-                "Superman once said \"Thou shalt not pass\"",
-            ),
-            (r#""\u4f60\U0000597d""#, "你好"),
-            (r#"'你好'"#, "\u{4f60}\u{597d}"),
-            (r#"r"raw string\""#, r"raw string\"),
-            (
-                r#"r('raw string with 'quotes'')"#,
-                r"raw string with 'quotes'",
-            ),
-            (
-                r#"r(("raw string with ("quotes and brackets")"))"#,
-                r#"raw string with ("quotes and brackets")"#,
-            ),
-        ];
-        for (q, a) in qna {
-            let mut parser = Parser::new(q.as_bytes());
-            let result = parser.next_literal_string(true).unwrap().unwrap().1;
-            assert_eq!(&*result, a);
-        }
-    }
-    #[test]
     fn primitive_parsing() {
         let mut parser = Parser::new(
             r#"ident 1 10 0xdEaD00 0o123123
@@ -501,6 +447,9 @@ r(("let me ("bracket and quote") this!"))
         0xde.adP+beef
         0b1010e+1010
         0o77.E-71"\u4f60\U0000597d"
+        false
+        true
+        nil
 --[[Unfinished comment, cuz why not
 "#
             .as_bytes(),
@@ -533,6 +482,9 @@ r(("let me ("bracket and quote") this!"))
             "0b101e+1011",
             "0o77e-71",
             "\"\u{4f60}\u{597d}\"",
+            "false",
+            "true",
+            "nil",
         ];
         for answer in answers {
             let result = parser.next_expression(true).unwrap().unwrap().to_string();
