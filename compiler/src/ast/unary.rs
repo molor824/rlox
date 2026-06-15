@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn parse_postfix() {
         let question = "a.b.c[1](2) (3 , 4)[5] (*a):map(a.b:foo())";
-        let answer = "(((((((((a).b).c)[1])(2))(3,4))[5])(*a)):map)((((a).b):foo)())";
+        let answer = "(((((((((a).b).c)[1])(2))(3, 4))[5])(*a)):map)((((a).b):foo)())";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser
             .next_postfix_operators(false)
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn parse_unary() {
         let question = "\t- - -  not~ ~ not  \t\t !not a . b . c (    d , e ) [ f  ] ";
-        let answer = "-(-(-(!(~(~(!(!(!(((((a).b).c)(d,e))[f])))))))))";
+        let answer = "-(-(-(!(~(~(!(!(!(((((a).b).c)(d, e))[f])))))))))";
         let mut parser = Parser::new(question.as_bytes());
         let result = parser.next_unary(false).unwrap().unwrap().to_string();
         assert_eq!(result, answer)

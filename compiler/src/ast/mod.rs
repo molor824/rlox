@@ -148,6 +148,8 @@ pub enum ErrorKind {
     ExpectedEnd,
     #[error("Expected `then`")]
     ExpectedThen,
+    #[error("Expected `in`")]
+    ExpectedIn,
     #[error("Expected `do ... end` block")]
     ExpectedDoBlock,
     #[error("Invalid expression behind `=` operator. Only variable, property and/or indexing is allowed.")]

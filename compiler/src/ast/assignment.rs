@@ -34,8 +34,8 @@ impl<R: BufRead> Parser<R> {
                 arrow,
                 Box::new(expr),
             ))))
-        } else if let Some(do_block) = self.next_do_block(skip_newline)? {
-            Ok(Some(FunctionBody::Block(do_block)))
+        } else if let Some(block) = self.next_do_block(skip_newline)? {
+            Ok(Some(FunctionBody::Block(block)))
         } else {
             Ok(None)
         }
@@ -91,6 +91,18 @@ impl<R: BufRead> Parser<R> {
             assigner: Box::new(assigner),
         }))
     }
+    pub fn expr_to_assignee(&self, expression: Expression) -> Result<Assignee> {
+        let span = expression.span();
+        match expression {
+            Expression::Ident(ident) => Ok(Assignee::Ident(ident)),
+            Expression::Postfix { operator, operand } => match operator {
+                PostfixOperator::Property(ident) => Ok(Assignee::Property { ident, operand }),
+                PostfixOperator::Index(arg) => Ok(Assignee::Index { arg, operand }),
+                _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
+            },
+            _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
+        }
+    }
     pub fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         if let Some(decl) = self.next_function_decl(skip_newline)? {
             return Ok(Some(decl));
@@ -110,19 +122,8 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(equal, ErrorKind::ExpectedExpr));
         };
 
-        let span = assignee.span();
-        let assignee = match assignee {
-            Expression::Ident(ident) => Ok(Assignee::Ident(ident)),
-            Expression::Postfix { operator, operand } => match operator {
-                PostfixOperator::Property(ident) => Ok(Assignee::Property { ident, operand }),
-                PostfixOperator::Index(arg) => Ok(Assignee::Index { arg, operand }),
-                _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
-            },
-            _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
-        }?;
-
         Ok(Some(Expression::Assign {
-            assignee,
+            assignee: self.expr_to_assignee(assignee)?,
             assigner: Box::new(assigner),
         }))
     }

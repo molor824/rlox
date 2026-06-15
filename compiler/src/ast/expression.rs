@@ -284,7 +284,7 @@ impl fmt::Display for PostfixOperator {
                     .iter()
                     .map(|arg| arg.to_string())
                     .collect::<Vec<_>>()
-                    .join(",")
+                    .join(", ")
             ),
             Self::Method(method) => write!(f, ":{method}"),
             Self::Index(args) => write!(f, "[{}]", args.1),
