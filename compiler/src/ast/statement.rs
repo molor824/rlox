@@ -27,6 +27,9 @@ pub enum Statement {
         expr: Expression,
         block: SpanOf<Vec<Statement>>,
     },
+    Continue(Span),
+    Break(Span),
+    Return(SpanOf<Option<Expression>>),
 }
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -60,6 +63,15 @@ impl fmt::Display for Statement {
                 print_indent(&block.1, f)?;
                 write!(f, "end")
             }
+            Self::Break(_) => write!(f, "break"),
+            Self::Continue(_) => write!(f, "continue"),
+            Self::Return(expr) => {
+                write!(f, "return")?;
+                match &expr.1 {
+                    Some(expr) => write!(f, " {}", expr),
+                    None => Ok(()),
+                }
+            }
         }
     }
 }
@@ -70,6 +82,9 @@ impl GetSpan for Statement {
             Self::While { span, .. } => *span,
             Self::If { span, .. } => *span,
             Self::For { span, .. } => *span,
+            Self::Break(span) => *span,
+            Self::Continue(span) => *span,
+            Self::Return(expr) => expr.0,
         }
     }
 }
@@ -158,10 +173,7 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(if_keyword.0, ErrorKind::ExpectedExpr));
         };
         let Some(then_keyword) = self.next_keyword("then", true)? else {
-            return Err(self.error(
-                if_keyword.0.concat(condition.span()),
-                ErrorKind::ExpectedThen,
-            ));
+            return Err(self.error(condition.span(), ErrorKind::ExpectedThen));
         };
         let (met_block, Some(terminator)) = self.next_block()? else {
             return Err(self.error(if_keyword.0.concat(then_keyword.0), ErrorKind::ExpectedElse));
@@ -218,11 +230,38 @@ impl<R: BufRead> Parser<R> {
         self.next_expression(false)
             .map(|expr| expr.map(Statement::Expression))
     }
+    fn next_break_continue_statement(&mut self) -> Result<Option<Statement>> {
+        let Some(keyword) = self.next_keywords(["break", "continue"], true)? else {
+            return Ok(None);
+        };
+
+        let keyword_str = keyword.get_str();
+        match &*keyword_str {
+            "break" => Ok(Some(Statement::Break(keyword.0))),
+            _ => Ok(Some(Statement::Continue(keyword.0))),
+        }
+    }
+    fn next_return_statement(&mut self) -> Result<Option<Statement>> {
+        let Some(keyword) = self.next_keyword("return", true)? else {
+            return Ok(None);
+        };
+
+        let expr = self.next_expression(false)?;
+        Ok(Some(Statement::Return(SpanOf(
+            match &expr {
+                Some(expr) => keyword.0.concat(expr.span()),
+                None => keyword.0,
+            },
+            expr,
+        ))))
+    }
     pub fn next_statement(&mut self) -> Result<Option<Statement>> {
         let order = [
             Self::next_if_statement,
             Self::next_while_statement,
             Self::next_for_statement,
+            Self::next_break_continue_statement,
+            Self::next_return_statement,
             Self::next_expr_statement,
         ];
         self.skip_seperator()?;
@@ -253,10 +292,15 @@ mod tests {
         let i = 1
         while i < 100 do
             print(i)
+            if i > 60 then break end
             i = i * 2
         end
         for i in range(0, 100) do
+            if i % 2 != 0 then continue end
             print(i)
+        end
+        fn add(x, y) do
+            return x + y
         end
         "#;
         let answers = [
@@ -274,10 +318,19 @@ end"#,
             "let i = (1)",
             "while (i) < (100) do
 . (print)(i)
+. if (i) > (60) then
+. . break
+. end
 . (i) = ((i) * (2))
 end",
             "for i in (range)(0, 100) do
+. if ((i) % (2)) != (0) then
+. . continue
+. end
 . (print)(i)
+end",
+            "fn add(x, y) do
+. return (x) + (y)
 end",
         ];
 

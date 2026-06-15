@@ -141,7 +141,7 @@ impl<R: BufRead> Parser<R> {
     fn next_multiplication(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         self.next_left_binary(
             |parser| parser.next_power(skip_newline),
-            |parser| parser.next_binary_operator(["*", "/"], skip_newline),
+            |parser| parser.next_binary_operator(["*", "/", "%"], skip_newline),
         )
     }
     fn next_power(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
