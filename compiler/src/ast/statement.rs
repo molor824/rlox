@@ -12,12 +12,6 @@ pub enum Statement {
         condition: SpanOf<Box<Expression>>, // span covers `while <expr>`
         block: SpanOf<Vec<Statement>>,      // span covers `do ... end`
     },
-    For {
-        initial: SpanOf<Option<Box<Expression>>>, // span covers `for <expr>` or `for`
-        condition: Option<SpanOf<Box<Expression>>>, // span covers `where <expr>`
-        repeat: Option<SpanOf<Box<Expression>>>,  // span covers `repeat <expr>`
-        block: SpanOf<Vec<Statement>>,            // span covers `do ... end`
-    },
 }
 
 pub fn print_indent(statements: &[Statement], f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -51,27 +45,6 @@ impl fmt::Display for Statement {
                 print_indent(&block.1, f)?;
                 write!(f, "end")
             }
-            Self::For {
-                initial,
-                condition,
-                repeat,
-                block,
-                ..
-            } => {
-                write!(f, "for ")?;
-                if let Some(i) = &initial.1 {
-                    write!(f, "{}", i)?;
-                }
-                if let Some(c) = condition {
-                    write!(f, "where {}", c.1)?;
-                }
-                if let Some(r) = repeat {
-                    write!(f, "repeat {}", r.1)?;
-                }
-                writeln!(f, " do")?;
-                print_indent(&block.1, f)?;
-                write!(f, "end")
-            }
         }
     }
 }
@@ -79,7 +52,6 @@ impl GetSpan for Statement {
     fn span(&self) -> Span {
         match self {
             Self::Expression(expr) => expr.span(),
-            Self::For { initial, block, .. } => initial.0.concat(block.0),
             Self::While { condition, block } => condition.0.concat(block.0),
             Self::If {
                 condition,
@@ -109,11 +81,9 @@ impl<R: BufRead> Parser<R> {
                 statements.push(statement);
             }
             if !self.skip_seperator()? {
-                break;
+                return Ok((statements, self.next_terminators()?));
             }
         }
-
-        Ok((statements, self.next_terminators()?))
     }
     pub fn next_do_block(&mut self, skip_newline: bool) -> Result<Option<SpanOf<Vec<Statement>>>> {
         let Some(do_keyword) = self.next_keyword("do", skip_newline)? else {
@@ -128,37 +98,7 @@ impl<R: BufRead> Parser<R> {
         Ok(Some(SpanOf(do_keyword.0.concat(terminator.0), statements)))
     }
     fn next_for_statement(&mut self) -> Result<Option<Statement>> {
-        let Some(for_keyword) = self.next_keyword("for", true)? else {
-            return Ok(None);
-        };
-        let initial = self.next_expression(true)?.map(Box::new);
-        let condition = match self.next_keyword("where", true)? {
-            Some(kwd) => {
-                let Some(expr) = self.next_expression(true)? else {
-                    return Err(self.error(kwd.0, ErrorKind::ExpectedExpr));
-                };
-                Some(SpanOf(kwd.0, Box::new(expr)))
-            }
-            None => None,
-        };
-        let repeat = match self.next_keyword("repeat", true)? {
-            Some(kwd) => {
-                let Some(expr) = self.next_expression(true)? else {
-                    return Err(self.error(kwd.0, ErrorKind::ExpectedExpr));
-                };
-                Some(SpanOf(kwd.0, Box::new(expr)))
-            }
-            None => None,
-        };
-        let Some(block) = self.next_do_block(true)? else {
-            return Err(self.error(for_keyword.0, ErrorKind::ExpectedDoBlock));
-        };
-        Ok(Some(Statement::For {
-            initial: SpanOf(for_keyword.0, initial),
-            condition,
-            repeat,
-            block,
-        }))
+        todo!("Not implemented yet! Until declaration syntax is resolved.")
     }
     fn next_while_statement(&mut self) -> Result<Option<Statement>> {
         let Some(while_keyword) = self.next_keyword("while", true)? else {
@@ -244,9 +184,11 @@ impl<R: BufRead> Parser<R> {
         let order = [
             Self::next_if_statement,
             Self::next_while_statement,
-            Self::next_for_statement,
+            // TODO: Implement declaration syntax
+            // Self::next_for_statement, 
             Self::next_expr_statement,
         ];
+        self.skip_seperator()?;
         for method in order {
             if let Some(stmt) = method(self)? {
                 return Ok(Some(stmt));
@@ -261,7 +203,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_if() {
+    fn test_statements() {
         let question = r#"
         if true then
             print("Hello, world!");
@@ -269,20 +211,28 @@ mod tests {
 
             ;;;;; -- Some weird fuck decided to spam semicolons, but it's technically valid code anyways.
 
-        else if false then print("Inlining!") end
+        else if false then print("Inlining!")
         else print("Semicolon is necessary"); print("In this case!") end
         "#;
-        let answer = r#"if true then
+        let answers = [
+            r#"if true then
 . (print)("Hello, world!")
 . (print)("Semicolon is unnecessary, although it is optional!")
 else
 . if false then
 . . (print)("Inlining!")
+. else
+. . (print)("Semicolon is necessary")
+. . (print)("In this case!")
 . end
-end"#;
+end"#,
+        ];
 
         let mut parser = Parser::new(question.as_bytes());
-        let result = parser.next_statement().unwrap().unwrap().to_string();
-        assert_eq!(result, answer);
+
+        for answer in answers {
+            let result = parser.next_statement().unwrap().unwrap().to_string();
+            assert_eq!(result, answer);
+        }
     }
 }

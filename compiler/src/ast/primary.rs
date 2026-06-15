@@ -90,72 +90,8 @@ impl<R: BufRead> Parser<R> {
         };
         Ok(Some(Expression::Object(SpanOf(start.concat(end), pairs))))
     }
-    fn next_params(&mut self) -> Result<(Vec<SourceSpan>, Option<SpanOf<SourceSpan>>)> {
-        let mut params = vec![];
-        let mut variadic = None;
-
-        loop {
-            let star = self.next_symbol("*", true)?;
-            let Some(ident) = self.next_ident(true)? else {
-                match star {
-                    Some(star) => return Err(self.error(star, ErrorKind::ExpectedIdent)),
-                    None => break,
-                }
-            };
-            if let Some(star) = star {
-                variadic = Some(SpanOf(star, ident));
-                break;
-            } else {
-                params.push(ident);
-            }
-            if self.next_symbol(",", true)?.is_none() {
-                break;
-            }
-        }
-        Ok((params, variadic))
-    }
-    fn next_body(&mut self, skip_newline: bool) -> Result<Option<FunctionBody>> {
-        if let Some(arrow) = self.next_symbol("=>", skip_newline)? {
-            let Some(expr) = self.next_expression(skip_newline)? else {
-                return Err(self.error(arrow, ErrorKind::ExpectedExpr));
-            };
-            Ok(Some(FunctionBody::Expression(SpanOf(
-                arrow,
-                Box::new(expr),
-            ))))
-        } else if let Some(do_block) = self.next_do_block(skip_newline)? {
-            Ok(Some(FunctionBody::Block(do_block)))
-        } else {
-            Ok(None)
-        }
-    }
-    fn next_closure(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        let Some(fn_kwd) = self.next_keyword("fn", skip_newline)? else {
-            return Ok(None);
-        };
-        let Some(paren_start) = self.next_symbol("(", skip_newline)? else {
-            return Err(self.error(fn_kwd.0, ErrorKind::ExpectedLeftParen));
-        };
-        let (params, variadic) = self.next_params()?;
-
-        let Some(paren_end) = self.next_symbol(")", true)? else {
-            return Err(self.error(paren_start, ErrorKind::ExpectedRightParen));
-        };
-
-        let Some(body) = self.next_body(skip_newline)? else {
-            return Err(self.error(fn_kwd.0.concat(paren_end), ErrorKind::ExpectedFuncBody));
-        };
-
-        Ok(Some(Expression::Closure {
-            fn_keyword: fn_kwd.0,
-            params,
-            variadic,
-            body,
-        }))
-    }
     pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let methods = [
-            Self::next_closure,
             Self::next_group,
             Self::next_array,
             Self::next_object,
@@ -181,12 +117,6 @@ mod tests {
             [4,
             [5, 6],
             ]
-            fn(a, b) => a + b
-            fn(a,b,  ) do
-                print(a + b)
-                print(a - b)
-            end
-            fn(a, b, *c) => [a, b, *c]
             { *obj, a: 1,
              b: 2}
             [1, 2, *a, *b, 3]
@@ -198,9 +128,6 @@ mod tests {
         let answers = [
             "[1, 2, 3]",
             "[4, [5, 6]]",
-            "fn(a, b) => (a) + (b)",
-            "fn(a, b) do\n. (print)((a) + (b))\n. (print)((a) - (b))\nend",
-            "fn(a, b, *c) => [a, b, *c]",
             "{*obj, a: 1, b: 2}",
             "[1, 2, *a, *b, 3]",
             "{x: x, y: y, z: z, *{x: 2, y: 3}}",

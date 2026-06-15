@@ -41,11 +41,17 @@ pub enum Expression {
         assignee: Assignee,
         assigner: Box<Expression>,
     },
-    Closure {
+    FunctionDecl {
         fn_keyword: Span,
+        assignee: Option<Assignee>,
         params: Vec<SourceSpan>,
         variadic: Option<SpanOf<SourceSpan>>, // span covers *ident
         body: FunctionBody,
+    },
+    LetDecl {
+        let_keyword: Span,
+        assignee: Assignee,
+        assigner: Box<Expression>,
     },
 }
 impl fmt::Display for Expression {
@@ -82,21 +88,23 @@ impl fmt::Display for Expression {
                 right_operand,
             } => write!(f, "({left_operand}) {} ({right_operand})", operator.1),
             Self::Assign { assignee, assigner } => write!(f, "({assignee}) = ({assigner})"),
-            Self::Closure {
+            Self::FunctionDecl {
+                assignee,
                 params,
                 variadic,
                 body,
                 ..
             } => {
-                write!(
-                    f,
-                    "fn({}",
-                    params
-                        .iter()
-                        .map(|param| param.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )?;
+                write!(f, "fn")?;
+                if let Some(assignee) = assignee {
+                    write!(f, " {}", assignee)?;
+                }
+                for (i, param) in params.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", param)?;
+                }
                 if let Some(variadic) = variadic {
                     if !params.is_empty() {
                         write!(f, ", ")?;
@@ -105,6 +113,9 @@ impl fmt::Display for Expression {
                 }
                 write!(f, ") {body}")
             }
+            Self::LetDecl {
+                assignee, assigner, ..
+            } => write!(f, "(let {assignee}) = ({assigner})"),
         }
     }
 }
@@ -129,9 +140,14 @@ impl GetSpan for Expression {
                 .concat(right_operand.span())
                 .concat(operator.0),
             Self::Assign { assignee, assigner } => assignee.span().concat(assigner.span()),
-            Self::Closure {
+            Self::FunctionDecl {
                 body, fn_keyword, ..
             } => fn_keyword.concat(body.span()),
+            Self::LetDecl {
+                let_keyword,
+                assigner,
+                ..
+            } => let_keyword.concat(assigner.span()),
         }
     }
 }
