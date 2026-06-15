@@ -1,18 +1,6 @@
 use crate::ast::{expression::*, *};
 
 impl<R: BufRead> Parser<R> {
-    fn expr_to_assignee(&self, expression: Expression) -> Result<Assignee> {
-        let span = expression.span();
-        match expression {
-            Expression::Ident(ident) => Ok(Assignee::Ident(ident)),
-            Expression::Postfix { operator, operand } => match operator {
-                PostfixOperator::Property(ident) => Ok(Assignee::Property { ident, operand }),
-                PostfixOperator::Index(arg) => Ok(Assignee::Index { arg, operand }),
-                _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
-            },
-            _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
-        }
-    }
     fn next_params(&mut self) -> Result<(Vec<SourceSpan>, Option<SpanOf<SourceSpan>>)> {
         let mut params = vec![];
         let mut variadic = None;
@@ -57,10 +45,7 @@ impl<R: BufRead> Parser<R> {
             return Ok(None);
         };
 
-        let assignee = match self.next_expression(skip_newline)? {
-            Some(expr) => Some(self.expr_to_assignee(expr)?),
-            None => None,
-        };
+        let ident = self.next_ident(skip_newline)?;
 
         let Some(paren_start) = self.next_symbol("(", skip_newline)? else {
             return Err(self.error(fn_kwd.0, ErrorKind::ExpectedLeftParen));
@@ -77,16 +62,43 @@ impl<R: BufRead> Parser<R> {
 
         Ok(Some(Expression::FunctionDecl {
             fn_keyword: fn_kwd.0,
-            assignee,
+            ident,
             params,
             variadic,
             body,
         }))
     }
-    pub fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        let lower = |parser: &mut Self| parser.next_binary(skip_newline);
+    pub fn next_let_decl(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let Some(let_kwd) = self.next_keyword("let", skip_newline)? else {
+            return Ok(None);
+        };
 
-        let Some(assignee) = lower(self)? else {
+        let Some(ident) = self.next_ident(skip_newline)? else {
+            return Err(self.error(let_kwd.0, ErrorKind::ExpectedIdent));
+        };
+
+        let Some(eq) = self.next_symbol("=", skip_newline)? else {
+            return Err(self.error(ident.0, ErrorKind::ExpectedEq));
+        };
+
+        let Some(assigner) = self.next_expression(skip_newline)? else {
+            return Err(self.error(eq, ErrorKind::ExpectedExpr));
+        };
+
+        Ok(Some(Expression::LetDecl {
+            let_keyword: let_kwd.0,
+            ident,
+            assigner: Box::new(assigner),
+        }))
+    }
+    pub fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        if let Some(decl) = self.next_function_decl(skip_newline)? {
+            return Ok(Some(decl));
+        } else if let Some(decl) = self.next_let_decl(skip_newline)? {
+            return Ok(Some(decl));
+        }
+
+        let Some(assignee) = self.next_binary(skip_newline)? else {
             return Ok(None);
         };
 
@@ -98,8 +110,19 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(equal, ErrorKind::ExpectedExpr));
         };
 
+        let span = assignee.span();
+        let assignee = match assignee {
+            Expression::Ident(ident) => Ok(Assignee::Ident(ident)),
+            Expression::Postfix { operator, operand } => match operator {
+                PostfixOperator::Property(ident) => Ok(Assignee::Property { ident, operand }),
+                PostfixOperator::Index(arg) => Ok(Assignee::Index { arg, operand }),
+                _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
+            },
+            _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
+        }?;
+
         Ok(Some(Expression::Assign {
-            assignee: self.expr_to_assignee(assignee)?,
+            assignee,
             assigner: Box::new(assigner),
         }))
     }
@@ -114,11 +137,38 @@ mod tests {
         let question = r"
         a = b
         a.x = b.y = 2
-        a[0] = b[1] = c[2] + d[3] + e[4]";
+        a[0] = b[1] = c[2] + d[3] + e[4]
+        let a = let b = 3
+        fn add(a, b) => a + b
+        fn sum(*values) do
+            let total = 0
+            let i = 0
+            while i < values:len() do
+                total = total + values[i]
+                i = i + 1
+            end
+        end
+        let a = { x: 0, y: 0 }
+        a.magnitude = fn(self) => sqrt(self.x * self.x + self.y * self.y)
+        print(a:magnitude())
+        ";
         let answers = [
             "(a) = (b)",
             "((a).x) = (((b).y) = (2))",
             "((a)[0]) = (((b)[1]) = ((((c)[2]) + ((d)[3])) + ((e)[4])))",
+            "let a = (let b = (3))",
+            "fn add(a, b) => (a) + (b)",
+            "fn sum(*values) do
+. let total = (0)
+. let i = (0)
+. while (i) < (((values):len)()) do
+. . (total) = ((total) + ((values)[i]))
+. . (i) = ((i) + (1))
+. end
+end",
+            "let a = ({x: 0, y: 0})",
+            "((a).magnitude) = (fn(self) => (sqrt)((((self).x) * ((self).x)) + (((self).y) * ((self).y))))",
+            "(print)(((a):magnitude)())"
         ];
 
         let mut parser = Parser::new(question.as_bytes());

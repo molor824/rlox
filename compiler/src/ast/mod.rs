@@ -132,6 +132,8 @@ pub enum ErrorKind {
     ExpectedRightCurly,
     #[error("Expected `:`")]
     ExpectedColon,
+    #[error("Expected `=`")]
+    ExpectedEq,
     #[error("Cannot use unpacking operation here")]
     UnexpectedUnpacking,
     #[error("Expected identifier")]
@@ -140,12 +142,12 @@ pub enum ErrorKind {
     ExpectedExpr,
     #[error("Array splitting already used")]
     RepeatingSplit,
-    #[error("Expected keyword `{0}`")]
-    ExpectedKeyword(&'static str),
     #[error("Expected `else` or `end` terminator at the end of block")]
     ExpectedElse,
     #[error("Expected `end` terminator at the end of block")]
     ExpectedEnd,
+    #[error("Expected `then`")]
+    ExpectedThen,
     #[error("Expected `do ... end` block")]
     ExpectedDoBlock,
     #[error("Invalid expression behind `=` operator. Only variable, property and/or indexing is allowed.")]

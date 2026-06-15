@@ -126,7 +126,7 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(if_keyword.0, ErrorKind::ExpectedExpr));
         };
         let Some(then_keyword) = self.next_keyword("then", true)? else {
-            return Err(self.error(condition.0, ErrorKind::ExpectedKeyword("then")));
+            return Err(self.error(condition.0, ErrorKind::ExpectedThen));
         };
         let (met_block, Some(terminator)) = self.next_block()? else {
             return Err(self.error(if_keyword.0.concat(then_keyword.0), ErrorKind::ExpectedElse));
@@ -185,7 +185,7 @@ impl<R: BufRead> Parser<R> {
             Self::next_if_statement,
             Self::next_while_statement,
             // TODO: Implement declaration syntax
-            // Self::next_for_statement, 
+            // Self::next_for_statement,
             Self::next_expr_statement,
         ];
         self.skip_seperator()?;
@@ -214,8 +214,7 @@ mod tests {
         else if false then print("Inlining!")
         else print("Semicolon is necessary"); print("In this case!") end
         "#;
-        let answers = [
-            r#"if true then
+        let answers = [r#"if true then
 . (print)("Hello, world!")
 . (print)("Semicolon is unnecessary, although it is optional!")
 else
@@ -225,8 +224,7 @@ else
 . . (print)("Semicolon is necessary")
 . . (print)("In this case!")
 . end
-end"#,
-        ];
+end"#];
 
         let mut parser = Parser::new(question.as_bytes());
 

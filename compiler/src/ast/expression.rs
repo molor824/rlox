@@ -43,14 +43,14 @@ pub enum Expression {
     },
     FunctionDecl {
         fn_keyword: Span,
-        assignee: Option<Assignee>,
+        ident: Option<SourceSpan>, // Closure if None
         params: Vec<SourceSpan>,
         variadic: Option<SpanOf<SourceSpan>>, // span covers *ident
         body: FunctionBody,
     },
     LetDecl {
         let_keyword: Span,
-        assignee: Assignee,
+        ident: SourceSpan,
         assigner: Box<Expression>,
     },
 }
@@ -89,16 +89,17 @@ impl fmt::Display for Expression {
             } => write!(f, "({left_operand}) {} ({right_operand})", operator.1),
             Self::Assign { assignee, assigner } => write!(f, "({assignee}) = ({assigner})"),
             Self::FunctionDecl {
-                assignee,
+                ident,
                 params,
                 variadic,
                 body,
                 ..
             } => {
                 write!(f, "fn")?;
-                if let Some(assignee) = assignee {
-                    write!(f, " {}", assignee)?;
+                if let Some(ident) = ident {
+                    write!(f, " {}", ident)?;
                 }
+                write!(f, "(")?;
                 for (i, param) in params.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
@@ -114,8 +115,8 @@ impl fmt::Display for Expression {
                 write!(f, ") {body}")
             }
             Self::LetDecl {
-                assignee, assigner, ..
-            } => write!(f, "(let {assignee}) = ({assigner})"),
+                ident, assigner, ..
+            } => write!(f, "let {ident} = ({assigner})"),
         }
     }
 }
