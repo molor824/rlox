@@ -48,8 +48,8 @@ pub enum Expression {
         variadic: Option<SpanOf<SourceSpan>>, // span covers *ident
         body: FunctionBody,
     },
-    LetDecl {
-        let_keyword: Span,
+    VarDecl {
+        keyword: SourceSpan,
         ident: SourceSpan,
         assigner: Box<Expression>,
     },
@@ -114,9 +114,11 @@ impl fmt::Display for Expression {
                 }
                 write!(f, ") {body}")
             }
-            Self::LetDecl {
-                ident, assigner, ..
-            } => write!(f, "let {ident} = ({assigner})"),
+            Self::VarDecl {
+                ident,
+                assigner,
+                keyword,
+            } => write!(f, "{keyword} {ident} = ({assigner})"),
         }
     }
 }
@@ -144,11 +146,9 @@ impl GetSpan for Expression {
             Self::FunctionDecl {
                 body, fn_keyword, ..
             } => fn_keyword.concat(body.span()),
-            Self::LetDecl {
-                let_keyword,
-                assigner,
-                ..
-            } => let_keyword.concat(assigner.span()),
+            Self::VarDecl {
+                keyword, assigner, ..
+            } => keyword.0.concat(assigner.span()),
         }
     }
 }

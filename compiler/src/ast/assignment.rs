@@ -68,13 +68,13 @@ impl<R: BufRead> Parser<R> {
             body,
         }))
     }
-    pub fn next_let_decl(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        let Some(let_kwd) = self.next_keyword("let", skip_newline)? else {
+    pub fn next_var_decl(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let Some(var_kwd) = self.next_keywords(["let", "const"], skip_newline)? else {
             return Ok(None);
         };
 
         let Some(ident) = self.next_ident(skip_newline)? else {
-            return Err(self.error(let_kwd.0, ErrorKind::ExpectedIdent));
+            return Err(self.error(var_kwd.0, ErrorKind::ExpectedIdent));
         };
 
         let Some(eq) = self.next_symbol("=", skip_newline)? else {
@@ -85,8 +85,8 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(eq, ErrorKind::ExpectedExpr));
         };
 
-        Ok(Some(Expression::LetDecl {
-            let_keyword: let_kwd.0,
+        Ok(Some(Expression::VarDecl {
+            keyword: var_kwd,
             ident,
             assigner: Box::new(assigner),
         }))
@@ -94,7 +94,7 @@ impl<R: BufRead> Parser<R> {
     pub fn next_assignment(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         if let Some(decl) = self.next_function_decl(skip_newline)? {
             return Ok(Some(decl));
-        } else if let Some(decl) = self.next_let_decl(skip_newline)? {
+        } else if let Some(decl) = self.next_var_decl(skip_newline)? {
             return Ok(Some(decl));
         }
 
@@ -135,10 +135,10 @@ mod tests {
     #[test]
     fn parse_assignment() {
         let question = r"
-        a = b
+        a = b = c
         a.x = b.y = 2
         a[0] = b[1] = c[2] + d[3] + e[4]
-        let a = let b = 3
+        let a = const b = 3
         fn add(a, b) => a + b
         fn sum(*values) do
             let total = 0
@@ -153,10 +153,10 @@ mod tests {
         print(a:magnitude())
         ";
         let answers = [
-            "(a) = (b)",
+            "(a) = ((b) = (c))",
             "((a).x) = (((b).y) = (2))",
             "((a)[0]) = (((b)[1]) = ((((c)[2]) + ((d)[3])) + ((e)[4])))",
-            "let a = (let b = (3))",
+            "let a = (const b = (3))",
             "fn add(a, b) => (a) + (b)",
             "fn sum(*values) do
 . let total = (0)
