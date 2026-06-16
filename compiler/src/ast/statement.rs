@@ -122,23 +122,23 @@ impl<R: BufRead> Parser<R> {
         Ok(Some(SpanOf(do_keyword.0.concat(terminator.0), statements)))
     }
     fn next_for_statement(&mut self) -> Result<Option<Statement>> {
-        let Some(for_keyword) = self.next_keyword("for", true)? else {
+        let Some(for_keyword) = self.next_keyword("for", false)? else {
             return Ok(None);
         };
 
-        let Some(ident) = self.next_ident(true)? else {
+        let Some(ident) = self.next_ident(false)? else {
             return Err(self.error(for_keyword.0, ErrorKind::ExpectedIdent));
         };
 
-        let Some(in_keyword) = self.next_keyword("in", true)? else {
+        let Some(in_keyword) = self.next_keyword("in", false)? else {
             return Err(self.error(ident.0, ErrorKind::ExpectedIn));
         };
 
-        let Some(expr) = self.next_expression(true)? else {
+        let Some(expr) = self.next_expression(false)? else {
             return Err(self.error(in_keyword.0, ErrorKind::ExpectedExpr));
         };
 
-        let Some(block) = self.next_do_block(true)? else {
+        let Some(block) = self.next_do_block(false)? else {
             return Err(self.error(expr.span(), ErrorKind::ExpectedDoBlock));
         };
 
@@ -150,13 +150,13 @@ impl<R: BufRead> Parser<R> {
         }))
     }
     fn next_while_statement(&mut self) -> Result<Option<Statement>> {
-        let Some(while_keyword) = self.next_keyword("while", true)? else {
+        let Some(while_keyword) = self.next_keyword("while", false)? else {
             return Ok(None);
         };
-        let Some(condition) = self.next_expression(true)? else {
+        let Some(condition) = self.next_expression(false)? else {
             return Err(self.error(while_keyword.0, ErrorKind::ExpectedExpr));
         };
-        let Some(block) = self.next_do_block(true)? else {
+        let Some(block) = self.next_do_block(false)? else {
             return Err(self.error(while_keyword.0, ErrorKind::ExpectedDoBlock));
         };
         Ok(Some(Statement::While {
@@ -166,13 +166,13 @@ impl<R: BufRead> Parser<R> {
         }))
     }
     fn next_if_statement(&mut self) -> Result<Option<Statement>> {
-        let Some(if_keyword) = self.next_keyword("if", true)? else {
+        let Some(if_keyword) = self.next_keyword("if", false)? else {
             return Ok(None);
         };
-        let Some(condition) = self.next_expression(true)? else {
+        let Some(condition) = self.next_expression(false)? else {
             return Err(self.error(if_keyword.0, ErrorKind::ExpectedExpr));
         };
-        let Some(then_keyword) = self.next_keyword("then", true)? else {
+        let Some(then_keyword) = self.next_keyword("then", false)? else {
             return Err(self.error(condition.span(), ErrorKind::ExpectedThen));
         };
         let (met_block, Some(terminator)) = self.next_block()? else {
@@ -231,7 +231,7 @@ impl<R: BufRead> Parser<R> {
             .map(|expr| expr.map(Statement::Expression))
     }
     fn next_break_continue_statement(&mut self) -> Result<Option<Statement>> {
-        let Some(keyword) = self.next_keywords(["break", "continue"], true)? else {
+        let Some(keyword) = self.next_keywords(["break", "continue"], false)? else {
             return Ok(None);
         };
 
@@ -242,7 +242,7 @@ impl<R: BufRead> Parser<R> {
         }
     }
     fn next_return_statement(&mut self) -> Result<Option<Statement>> {
-        let Some(keyword) = self.next_keyword("return", true)? else {
+        let Some(keyword) = self.next_keyword("return", false)? else {
             return Ok(None);
         };
 

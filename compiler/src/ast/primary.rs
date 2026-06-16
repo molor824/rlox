@@ -23,10 +23,10 @@ impl<R: BufRead> Parser<R> {
         let Some(start) = self.next_symbol("(", skip_newline)? else {
             return Ok(None);
         };
-        let Some(expr) = self.next_expression(skip_newline)? else {
+        let Some(expr) = self.next_expression(true)? else {
             return Err(self.error(start, ErrorKind::ExpectedExpr));
         };
-        let Some(_) = self.next_symbol(")", skip_newline)? else {
+        let Some(_) = self.next_symbol(")", true)? else {
             return Err(self.error(expr.span(), ErrorKind::ExpectedRightParen));
         };
         Ok(Some(expr))

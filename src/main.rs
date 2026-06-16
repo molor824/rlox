@@ -5,7 +5,7 @@ fn main() {
     let mut parser = Parser::new(stdin.lock());
 
     loop {
-        let result = parser.next_expression(false).unwrap();
+        let result = parser.next_statement().unwrap();
         if let Some(r) = result {
             println!("{}", r);
         }
