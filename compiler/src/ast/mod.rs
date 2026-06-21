@@ -1,12 +1,12 @@
 #![allow(clippy::len_without_is_empty)]
 
-mod assignment;
-mod binary;
-mod expression;
-mod primary;
-mod primitive;
-mod statement;
-mod unary;
+pub mod assignment;
+pub mod binary;
+pub mod expression;
+pub mod primary;
+pub mod primitive;
+pub mod statement;
+pub mod unary;
 
 use std::{
     cell::RefCell,
