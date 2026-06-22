@@ -1,8 +1,12 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
+use crate::{ast::Span, interpreter::StringId};
+use crate::interpreter::LocalId;
+
 #[derive(Debug, thiserror::Error)]
 pub struct Error {
     buffer: Rc<RefCell<String>>,
+    span: Option<Span>,
     source: ErrorKind,
 }
 impl fmt::Display for Error {
@@ -13,6 +17,20 @@ impl fmt::Display for Error {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
-    #[error("Local id out of range")]
+    #[error("local id `{0}` exceeds arity `{1}`")]
+    ArityOverflow(LocalId, usize),
+    #[error("index `{0}` exceeds stack capacity `{1}`")]
+    StackOverflow(usize, usize),
+    #[error("local id out of range")]
     InvalidLocalId,
+    #[error("operator `{0}` cannot be applied to value of type `{1}` and `{2}`")]
+    InvalidBinary(&'static str, &'static str, &'static str),
+    #[error("string id `{0}` is not found in string interner")]
+    StringIdNotFound(StringId),
+    #[error("cannot convert value to type `{0}`")]
+    InvalidType(&'static str),
+    #[error("cannot index with nil value")]
+    NilIndexing,
+    #[error("cannot index with nan value")]
+    NanIndexing,
 }

@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 num-bigint = "0.4.6"
 thiserror = "2.0.9"
+rustc-hash = "2.1.2"

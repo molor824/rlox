@@ -1,17 +1,15 @@
-use std::{cell::RefCell, collections::HashMap, mem::swap, rc::Rc};
-
-use crate::{
-    ast::expression::Pair::Ident,
-    interpreter::{bytecode::Bytecode, value::Value},
-};
+use crate::interpreter::error::ErrorKind;
+use crate::interpreter::value::{Closure, Value};
+use rustc_hash::FxHashMap;
+use std::rc::Rc;
 
 pub mod bytecode;
 pub mod error;
 pub mod value;
 
-pub type GlobalId = u32;
+pub type StringId = usize;
 pub type LocalId = i32;
-pub type ClosureId = u32;
+pub type ClosureId = usize;
 
 #[derive(Default)]
 struct FunctionFrame {
@@ -24,7 +22,8 @@ pub struct Interpreter {
     instruction_pointer: usize,
     current_frame: FunctionFrame,
     frame_stack: Vec<FunctionFrame>,
-    globals: Globals,
+    globals: FxHashMap<StringId, Value>,
+    str_interner: StrInterner,
     closures: Vec<Closure>,
 }
 impl Default for Interpreter {
@@ -34,97 +33,64 @@ impl Default for Interpreter {
             instruction_pointer: 0,
             current_frame: FunctionFrame::default(),
             frame_stack: vec![],
-            globals: Globals::default(),
+            str_interner: StrInterner::default(),
             closures: vec![],
+            globals: FxHashMap::default(),
         }
     }
 }
 impl Interpreter {
-    pub fn add_closure(&mut self, closure: Closure) -> ClosureId {
-        let id = self.closures.len();
-        self.closures.push(closure);
-        id as ClosureId
-    }
-    pub fn declare_global(&mut self, name: &str, value: Value) -> Option<GlobalId> {
-        self.globals.declare_value(name, value)
-    }
-    pub fn run_closure(&mut self, closure: ClosureId) {}
-    fn get_local(&self, id: LocalId) -> Option<&Value> {
+    fn get_local(&self, id: LocalId) -> Option<Value> {
         if id < -(self.current_frame.arity as LocalId) {
             return None;
         }
         let absolute_id = self.current_frame.base_pointer as LocalId + id;
-        self.memory.get(absolute_id as usize)
+        self.memory.get(absolute_id as usize).cloned()
     }
-    fn set_local(&mut self, id: LocalId, new_value: Value) {
+    fn set_local(&mut self, id: LocalId, new_value: Value) -> Result<(), ErrorKind> {
         if id < -(self.current_frame.arity as LocalId) {
-            panic!("id({}) exceeds arity({})!", id, self.current_frame.arity);
+            return Err(ErrorKind::ArityOverflow(id, self.current_frame.arity));
         }
         let index = (self.current_frame.base_pointer as LocalId + id) as usize;
         if index >= self.memory.capacity() {
-            panic!(
-                "index({}) exceeds stack capacity({})!",
-                index,
-                self.memory.capacity()
-            );
+            return Err(ErrorKind::StackOverflow(index, self.memory.capacity()));
         }
         if index <= self.memory.len() {
             self.memory.resize(index + 1, Value::Nil);
         }
         self.memory[index] = new_value;
+        Ok(())
     }
-    fn interpret(&mut self, bytecode: Bytecode) {
-        match bytecode {
-            Bytecode::LoadArity(id) => {
-                self.set_local(id, Value::Integer(Rc::new(self.current_frame.arity.into())));
-            }
-            Bytecode::LoadNil(id) => self.set_local(id, Value::Nil),
-            Bytecode::LoadInt(id, int) => self.set_local(id, Value::Integer(Rc::new(int.into()))),
-            Bytecode::LoadFloat(id, float) => self.set_local(id, Value::Float(float)),
-            Bytecode::LoadStr(id, str) => self.set_local(id, Value::String(str)),
-            Bytecode::LoadObject(id, capacity) => self.set_local(
-                id,
-                Value::Object(Rc::new(RefCell::new(HashMap::with_capacity(capacity)))),
-            ),
-            Bytecode::LoadArray(id, capacity) => self.set_local(
-                id,
-                Value::Array(Rc::new(RefCell::new(Vec::with_capacity(capacity)))),
-            ),
-            _ => todo!(),
-        }
+    fn get_global(&self, id: StringId) -> Option<Value> {
+        self.globals.get(&id).cloned()
     }
-}
-
-#[derive(Debug)]
-pub struct Closure {
-    min_arity: usize,
-    variadic: bool,
-    upvalues: Vec<LocalId>,
-    body: Vec<Bytecode>,
+    fn set_global(&mut self, id: StringId, new_value: Value) {
+        self.globals.insert(id, new_value);
+    }
 }
 
 #[derive(Default)]
-pub struct Globals {
-    names: Vec<Rc<str>>,
-    name_to_id: HashMap<Rc<str>, GlobalId>,
-    values: HashMap<GlobalId, Value>,
+pub struct StrInterner {
+    strings: Vec<Rc<str>>,
+    str_to_id: FxHashMap<Rc<str>, StringId>,
 }
-impl Globals {
-    pub fn declare_value(&mut self, name: &str, value: Value) -> Option<GlobalId> {
-        if self.name_to_id.get(name).is_some() {
-            None
-        } else {
-            let name = Rc::<str>::from(name);
-            let id = self.names.len() as GlobalId;
-            self.names.push(name.clone());
-            self.name_to_id.insert(name, id);
-            self.values.insert(id, value);
-            Some(id)
+impl StrInterner {
+    pub fn add_string(&mut self, str: &str) -> StringId {
+        match self.str_to_id.get(str) {
+            Some(id) => *id,
+            None => {
+                let id = self.strings.len() as StringId;
+                let str = Rc::<str>::from(str);
+                self.strings.push(str.clone());
+                self.str_to_id.insert(str, id);
+                id
+            }
         }
     }
-    pub fn set_value(&mut self, id: GlobalId, mut new_value: Value) -> Option<Value> {
-        let value = self.values.get_mut(&id)?;
-        swap(value, &mut new_value);
-        Some(new_value)
+    pub fn id(&self, str: &str) -> Option<StringId> {
+        self.str_to_id.get(str).copied()
+    }
+    pub fn str(&self, id: StringId) -> Option<&Rc<str>> {
+        self.strings.get(id as usize)
     }
 }
