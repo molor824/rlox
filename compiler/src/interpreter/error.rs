@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::{ast::Span, interpreter::StringId};
+use crate::ast::Span;
 use crate::interpreter::LocalId;
 
 #[derive(Debug, thiserror::Error)]
@@ -23,10 +23,10 @@ pub enum ErrorKind {
     StackOverflow(usize, usize),
     #[error("local id out of range")]
     InvalidLocalId,
-    #[error("operator `{0}` cannot be applied to value of type `{1}` and `{2}`")]
+    #[error("binary operator `{0}` cannot be applied to value of type `{1}` and `{2}`")]
     InvalidBinary(&'static str, &'static str, &'static str),
-    #[error("string id `{0}` is not found in string interner")]
-    StringIdNotFound(StringId),
+    #[error("unary operator `{0}` cannot be applied to value of type `{1}`")]
+    InvalidUnary(&'static str, &'static str),
     #[error("cannot convert value to type `{0}`")]
     InvalidType(&'static str),
     #[error("cannot index with nil value")]

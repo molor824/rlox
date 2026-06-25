@@ -1,17 +1,20 @@
-use crate::interpreter::{bytecode::Bytecode, error::ErrorKind, LocalId, StrInterner, StringId};
+use crate::interpreter::string::ValueStr;
+use crate::interpreter::{bytecode::Bytecode, error::ErrorKind, LocalId};
+use rustc_hash::FxHashMap;
+use std::cmp::Ordering;
 use std::hash::Hash;
 use std::{cell::RefCell, rc::Rc};
-use rustc_hash::FxHashMap;
 
 #[derive(Default, Debug, Clone)]
 pub enum Value {
     #[default]
     Nil,
+    Bool(bool),
     Number(f64),
-    String(StringId),
+    String(ValueStr),
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<Object>>),
-    Closure(Rc<RefCell<Closure>>),
+    Function(Rc<RefCell<Closure>>),
 }
 
 #[derive(Default, Debug)]
@@ -30,7 +33,7 @@ impl Object {
         match key {
             Value::Nil => Err(ErrorKind::NilIndexing),
             Value::Number(num) if num.is_nan() => Err(ErrorKind::NanIndexing),
-            _ => Ok(())
+            _ => Ok(()),
         }
     }
     pub fn get_property(&self, key: &Value) -> Result<Option<Value>, ErrorKind> {
@@ -62,16 +65,17 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match self {
             Self::Nil => matches!(other, Self::Nil),
-            Self::Number(n1) => matches!(other, Self::Number(n2) if *n1 == *n2),
-            Self::String(str1) => matches!(other, Self::String(str2) if *str1 == *str2),
+            Self::Bool(b1) => matches!(other, Self::Bool(b2) if b1 == b2),
+            Self::Number(n1) => matches!(other, Self::Number(n2) if n1 == n2),
+            Self::String(str1) => matches!(other, Self::String(str2) if str1 == str2),
             Self::Array(arr1) => matches!(
                 other, Self::Array(arr2) if *arr1.borrow() == *arr2.borrow()
             ),
             Self::Object(obj1) => matches!(
                 other, Self::Object(obj2) if Rc::ptr_eq(obj1, obj2)
             ),
-            Self::Closure(fn1) => matches!(
-                other, Self::Closure(fn2) if Rc::ptr_eq(fn1, fn2)
+            Self::Function(fn1) => matches!(
+                other, Self::Function(fn2) if Rc::ptr_eq(fn1, fn2)
             ),
         }
     }
@@ -81,19 +85,21 @@ impl Hash for Value {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         state.write_u8(match self {
             Self::Nil => 0,
-            Self::Number(_) => 1,
-            Self::String(_) => 2,
-            Self::Array(_) => 3,
-            Self::Object(_) => 4,
-            Self::Closure(_) => 5,
+            Self::Bool(_) => 1,
+            Self::Number(_) => 2,
+            Self::String(_) => 3,
+            Self::Array(_) => 4,
+            Self::Object(_) => 5,
+            Self::Function(_) => 6,
         });
         match self {
             Self::Nil => (),
+            Self::Bool(b) => b.hash(state),
             Self::Number(num) => num.to_bits().hash(state),
             Self::String(str) => str.hash(state),
             Self::Array(arr) => arr.borrow().hash(state),
             Self::Object(obj) => obj.as_ptr().hash(state),
-            Self::Closure(closure) => closure.as_ptr().hash(state),
+            Self::Function(closure) => closure.as_ptr().hash(state),
         }
     }
 }
@@ -101,14 +107,15 @@ impl Value {
     fn type_str(&self) -> &'static str {
         match self {
             Self::Nil => "nil",
+            Self::Bool(_) => "boolean",
             Self::Number(_) => "number",
             Self::String(_) => "string",
             Self::Array(_) => "array",
             Self::Object(_) => "object",
-            Self::Closure(_) => "function",
+            Self::Function(_) => "function",
         }
     }
-    pub fn try_add(&self, interner: &mut StrInterner, other: &Self) -> Result<Self, ErrorKind> {
+    pub fn try_add(&self, other: &Self) -> Result<Self, ErrorKind> {
         let error = || {
             Err(ErrorKind::InvalidBinary(
                 "+",
@@ -130,16 +137,7 @@ impl Value {
                 _ => error(),
             },
             Self::String(lh) => match other {
-                Self::String(rh) => {
-                    let lh = interner.str(*lh).ok_or(ErrorKind::StringIdNotFound(*lh))?;
-                    let rh = interner.str(*rh).ok_or(ErrorKind::StringIdNotFound(*rh))?;
-
-                    let mut str = String::with_capacity(lh.len() + rh.len());
-                    str.push_str(lh);
-                    str.push_str(rh);
-
-                    Ok(Value::String(interner.add_string(&str)))
-                }
+                Self::String(rh) => Ok(Value::String(lh + rh)),
                 _ => error(),
             },
             _ => error(),
@@ -209,16 +207,46 @@ impl Value {
             _ => error(),
         }
     }
-    pub fn try_str(&self) -> Result<StringId, ErrorKind> {
+    pub fn try_neg(&self) -> Result<Value, ErrorKind> {
+        let error = || Err(ErrorKind::InvalidUnary("-", self.type_str()));
         match self {
-            Self::String(str) => Ok(*str),
-            _ => Err(ErrorKind::InvalidType(self.type_str()))
+            Self::Number(n) => Ok(Self::Number(-*n)),
+            _ => error(),
+        }
+    }
+    pub fn try_inv(&self) -> Result<Value, ErrorKind> {
+        let error = || Err(ErrorKind::InvalidUnary("~", self.type_str()));
+        match self {
+            Self::Number(n) => Ok(Self::Number(!(*n as i64) as f64)),
+            _ => error(),
+        }
+    }
+    pub fn try_cmp(&self, other: &Self) -> Result<Option<Ordering>, ErrorKind> {
+        let error = || {
+            Err(ErrorKind::InvalidBinary(
+                "< > <= >=",
+                self.type_str(),
+                other.type_str(),
+            ))
+        };
+        match self {
+            Self::Number(n1) => match other {
+                Self::Number(n2) => Ok(n1.partial_cmp(n2)),
+                _ => error(),
+            },
+            _ => error(),
+        }
+    }
+    pub fn try_str(&self) -> Result<ValueStr, ErrorKind> {
+        match self {
+            Self::String(str) => Ok(str.clone()),
+            _ => Err(ErrorKind::InvalidType(self.type_str())),
         }
     }
     pub fn try_obj(&self) -> Result<Rc<RefCell<Object>>, ErrorKind> {
         match self {
             Self::Object(obj) => Ok(obj.clone()),
-            _ => Err(ErrorKind::InvalidType(self.type_str()))
+            _ => Err(ErrorKind::InvalidType(self.type_str())),
         }
     }
 }

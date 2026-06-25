@@ -1,13 +1,13 @@
 use crate::interpreter::error::ErrorKind;
+use crate::interpreter::string::ValueStr;
 use crate::interpreter::value::{Closure, Value};
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
 
 pub mod bytecode;
 pub mod error;
+pub mod string;
 pub mod value;
 
-pub type StringId = usize;
 pub type LocalId = i32;
 pub type ClosureId = usize;
 
@@ -20,10 +20,10 @@ struct FunctionFrame {
 pub struct Interpreter {
     memory: Vec<Value>,
     instruction_pointer: usize,
+    next_ip: usize,
     current_frame: FunctionFrame,
     frame_stack: Vec<FunctionFrame>,
-    globals: FxHashMap<StringId, Value>,
-    str_interner: StrInterner,
+    globals: FxHashMap<ValueStr, Value>,
     closures: Vec<Closure>,
 }
 impl Default for Interpreter {
@@ -31,9 +31,9 @@ impl Default for Interpreter {
         Self {
             memory: Vec::with_capacity(0x100000),
             instruction_pointer: 0,
+            next_ip: 0,
             current_frame: FunctionFrame::default(),
             frame_stack: vec![],
-            str_interner: StrInterner::default(),
             closures: vec![],
             globals: FxHashMap::default(),
         }
@@ -61,36 +61,10 @@ impl Interpreter {
         self.memory[index] = new_value;
         Ok(())
     }
-    fn get_global(&self, id: StringId) -> Option<Value> {
+    fn get_global(&self, id: ValueStr) -> Option<Value> {
         self.globals.get(&id).cloned()
     }
-    fn set_global(&mut self, id: StringId, new_value: Value) {
+    fn set_global(&mut self, id: ValueStr, new_value: Value) {
         self.globals.insert(id, new_value);
-    }
-}
-
-#[derive(Default)]
-pub struct StrInterner {
-    strings: Vec<Rc<str>>,
-    str_to_id: FxHashMap<Rc<str>, StringId>,
-}
-impl StrInterner {
-    pub fn add_string(&mut self, str: &str) -> StringId {
-        match self.str_to_id.get(str) {
-            Some(id) => *id,
-            None => {
-                let id = self.strings.len() as StringId;
-                let str = Rc::<str>::from(str);
-                self.strings.push(str.clone());
-                self.str_to_id.insert(str, id);
-                id
-            }
-        }
-    }
-    pub fn id(&self, str: &str) -> Option<StringId> {
-        self.str_to_id.get(str).copied()
-    }
-    pub fn str(&self, id: StringId) -> Option<&Rc<str>> {
-        self.strings.get(id as usize)
     }
 }
