@@ -1,7 +1,7 @@
 use crate::interpreter::error::ErrorKind;
 use crate::interpreter::string::{InternedStr, ValueStr};
 use crate::interpreter::value::{Object, Value};
-use crate::interpreter::{ClosureId, Interpreter, LocalId};
+use crate::interpreter::{FnSignature, Interpreter, LocalId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -176,20 +176,19 @@ pub enum Bytecode {
     }, // [.0][[.1]] = [.2] --- Equivalent to a[b] = c
 
     // Creating custom types
-    LoadNil(LocalId),                // [.0] = nil
-    LoadFloat(LocalId, f64),         // [.0] = float(.1)
-    LoadStr(LocalId, InternedStr),   // [.0] = str(.1)
-    LoadArray(LocalId, usize),       // [.0] = array.with_capacity(.1)
-    LoadObject(LocalId, usize),      // [.0] = object.with_capacity(.1)
-    LoadClosure(LocalId, ClosureId), // [.0] = closure.from_function_address(.1)
+    LoadNil(LocalId),                      // [.0] = nil
+    LoadFloat(LocalId, f64),               // [.0] = float(.1)
+    LoadStr(LocalId, InternedStr),         // [.0] = str(.1)
+    LoadArray(LocalId, usize),             // [.0] = array.with_capacity(.1)
+    LoadObject(LocalId, usize),            // [.0] = object.with_capacity(.1)
+    LoadClosure(LocalId, Rc<FnSignature>), // [.0] = closure.from_function_address(.1)
 
     // Jumping
-    Jump(isize),           // IP += .0
-    JumpIndirect(LocalId), // IP += [.0]
+    Jump(isize), // IP += .0
 
     // Function call
     Call {
-        procedure: ClosureId,
+        procedure: Rc<FnSignature>,
         arity: u32,
     },
     CallIndirect {
@@ -208,7 +207,7 @@ impl Bytecode {
     pub fn interpret(self, interpreter: &mut Interpreter) -> Result<(), ErrorKind> {
         match self {
             Bytecode::LoadArity(id) => {
-                interpreter.set_local(id, Value::Number(interpreter.current_frame.arity as f64))
+                interpreter.set_local(id, Value::Number(interpreter.current_frame().arity as f64))
             }
             Bytecode::LoadNil(id) => interpreter.set_local(id, Value::Nil),
             Bytecode::LoadFloat(id, float) => interpreter.set_local(id, Value::Number(float)),
@@ -224,133 +223,136 @@ impl Bytecode {
                 Value::Array(Rc::new(RefCell::new(Vec::with_capacity(capacity)))),
             ),
             Bytecode::LoadGlobal { src, dst } => {
-                let value = interpreter
-                    .get_global(ValueStr::Interned(src))
-                    .unwrap_or_default();
+                let value = interpreter.get_global(ValueStr::Interned(src));
                 interpreter.set_local(dst, value)
             }
             Bytecode::LoadGlobalIndirect { src, dst } => {
-                let str_id = interpreter.get_local(src).unwrap_or_default().try_str()?;
-                let value = interpreter.get_global(str_id).unwrap_or_default();
+                let str_id = interpreter.get_local(src).try_str()?;
+                let value = interpreter.get_global(str_id);
                 interpreter.set_local(dst, value)
             }
             Bytecode::StoreGlobal { src, dst } => {
-                let value = interpreter.get_local(src).unwrap_or_default();
-                interpreter.set_global(ValueStr::Interned(dst), value);
+                let value = interpreter.get_local(src);
+                interpreter.set_global(ValueStr::Interned(dst), value)?;
                 Ok(())
             }
             Bytecode::StoreGlobalIndirect { src, dst } => {
-                let value = interpreter.get_local(src).unwrap_or_default();
-                let id = interpreter.get_local(dst).unwrap_or_default().try_str()?;
-                interpreter.set_global(id, value);
+                let value = interpreter.get_local(src);
+                let id = interpreter.get_local(dst).try_str()?;
+                interpreter.set_global(id, value)?;
                 Ok(())
             }
             Bytecode::Add { src0, src1, dst } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 let result = v0.try_add(&v1)?;
                 interpreter.set_local(dst, result)
             }
             Bytecode::Sub { src0, src1, dst } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(dst, v0.try_sub(&v1)?)
             }
             Bytecode::Mul { src0, src1, dst } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(dst, v0.try_mul(&v1)?)
             }
             Bytecode::Div { src0, src1, dst } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(dst, v0.try_div(&v1)?)
             }
             Bytecode::Rem { src0, src1, dst } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(dst, v0.try_rem(&v1)?)
             }
             Bytecode::Negate { dst, src } => {
-                let value = interpreter.get_local(src).unwrap_or_default();
+                let value = interpreter.get_local(src);
                 interpreter.set_local(dst, value.try_neg()?)
             }
             Bytecode::Invert { dst, src } => {
-                let value = interpreter.get_local(src).unwrap_or_default();
+                let value = interpreter.get_local(src);
                 interpreter.set_local(dst, value.try_inv()?)
             }
+            Bytecode::SetTrue { dst, src } => {
+                let value = interpreter.get_local(src);
+                interpreter.set_local(dst, Value::Bool(value.to_bool()))
+            }
+            Bytecode::SetFalse { dst, src } => {
+                let value = interpreter.get_local(src);
+                interpreter.set_local(dst, Value::Bool(!value.to_bool()))
+            }
             Bytecode::LoadProperty { dst, src, prop } => {
-                let obj = interpreter.get_local(src).unwrap_or_default().try_obj()?;
-                let property = obj
-                    .borrow()
-                    .get_property(&Value::String(ValueStr::Interned(prop)))?
-                    .unwrap_or_default();
+                let obj = interpreter.get_local(src).try_obj()?;
+                let property = obj.borrow().get_property(&ValueStr::Interned(prop))?;
                 interpreter.set_local(dst, property)
             }
             Bytecode::LoadPropertyIndirect { dst, src, prop } => {
-                let obj = interpreter.get_local(src).unwrap_or_default().try_obj()?;
-                let key = interpreter.get_local(prop).unwrap_or_default();
-                let property = obj.borrow().get_property(&key)?.unwrap_or_default();
+                let obj = interpreter.get_local(src).try_obj()?;
+                let key = interpreter.get_local(prop);
+                let property = obj.borrow().get_property(&key.try_str()?)?;
                 interpreter.set_local(dst, property)
             }
             Bytecode::StoreProperty { dst, src, prop } => {
-                let value = interpreter.get_local(src).unwrap_or_default();
-                let obj = interpreter.get_local(dst).unwrap_or_default().try_obj()?;
+                let value = interpreter.get_local(src);
+                let obj = interpreter.get_local(dst).try_obj()?;
                 let mut obj = obj.borrow_mut();
-                obj.set_property(Value::String(ValueStr::Interned(prop)), value)
+                obj.set_property(ValueStr::Interned(prop), value)
             }
             Bytecode::StorePropertyIndirect { dst, src, prop } => {
-                let value = interpreter.get_local(src).unwrap_or_default();
-                let obj = interpreter.get_local(dst).unwrap_or_default().try_obj()?;
-                let key = interpreter.get_local(prop).unwrap_or_default();
+                let value = interpreter.get_local(src);
+                let obj = interpreter.get_local(dst).try_obj()?;
+                let key = interpreter.get_local(prop);
                 let mut obj = obj.borrow_mut();
-                obj.set_property(key, value)
+                obj.set_property(key.try_str()?, value)
             }
             Bytecode::SetEq { dst, src0, src1 } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(dst, Value::Bool(v0 == v1))
             }
             Bytecode::SetNe { dst, src0, src1 } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(dst, Value::Bool(v0 != v1))
             }
             Bytecode::SetLt { dst, src0, src1 } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(
                     dst,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_lt())),
                 )
             }
             Bytecode::SetGt { dst, src0, src1 } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(
                     dst,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_gt())),
                 )
             }
             Bytecode::SetLe { dst, src0, src1 } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(
                     dst,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_le())),
                 )
             }
             Bytecode::SetGe { dst, src0, src1 } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 interpreter.set_local(
                     dst,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_ge())),
                 )
             }
             Bytecode::BrEq { src0, src1, offset } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 if v0 == v1 {
                     interpreter.next_ip =
                         ((interpreter.instruction_pointer as isize) + offset) as usize;
@@ -358,8 +360,8 @@ impl Bytecode {
                 Ok(())
             }
             Bytecode::BrNe { src0, src1, offset } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 if v0 != v1 {
                     interpreter.next_ip =
                         ((interpreter.instruction_pointer as isize) + offset) as usize;
@@ -367,8 +369,8 @@ impl Bytecode {
                 Ok(())
             }
             Bytecode::BrLt { src0, src1, offset } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_lt()) {
                     interpreter.next_ip =
                         ((interpreter.instruction_pointer as isize) + offset) as usize;
@@ -376,8 +378,8 @@ impl Bytecode {
                 Ok(())
             }
             Bytecode::BrGt { src0, src1, offset } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_gt()) {
                     interpreter.next_ip =
                         ((interpreter.instruction_pointer as isize) + offset) as usize;
@@ -385,8 +387,8 @@ impl Bytecode {
                 Ok(())
             }
             Bytecode::BrLe { src0, src1, offset } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_le()) {
                     interpreter.next_ip =
                         ((interpreter.instruction_pointer as isize) + offset) as usize;
@@ -394,14 +396,28 @@ impl Bytecode {
                 Ok(())
             }
             Bytecode::BrGe { src0, src1, offset } => {
-                let v0 = interpreter.get_local(src0).unwrap_or_default();
-                let v1 = interpreter.get_local(src1).unwrap_or_default();
+                let v0 = interpreter.get_local(src0);
+                let v1 = interpreter.get_local(src1);
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_ge()) {
                     interpreter.next_ip =
                         ((interpreter.instruction_pointer as isize) + offset) as usize;
                 }
                 Ok(())
             }
+            Bytecode::GlobalReadOnly(id) => {
+                interpreter.make_global_read_only(ValueStr::Interned(id));
+                Ok(())
+            }
+            Bytecode::Jump(offset) => {
+                interpreter.next_ip =
+                    ((interpreter.instruction_pointer as isize) + offset) as usize;
+                Ok(())
+            }
+            Bytecode::Clone { dst, src } => {
+                let value = interpreter.get_local(src);
+                interpreter.set_local(dst, value)
+            }
+            Bytecode::Truncate(trunc) => interpreter.truncate(trunc),
             _ => todo!(),
         }
     }

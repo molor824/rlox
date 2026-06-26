@@ -14,6 +14,15 @@ pub struct IndexableStr {
     kind: StringKind,
     hash: u64,
 }
+impl IndexableStr {
+    pub fn len(&self) -> usize {
+        match &self.kind {
+            StringKind::Utf8(utf8) => utf8.len(),
+            StringKind::Utf16(utf16) => utf16.len(),
+            StringKind::Utf32(utf32) => utf32.len(),
+        }
+    }
+}
 impl<S: AsRef<str>> From<S> for IndexableStr {
     fn from(value: S) -> Self {
         StringKind::from(value).into()
@@ -64,7 +73,7 @@ impl Add for &IndexableStr {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub enum StringKind {
+enum StringKind {
     Utf8(Rc<[u8]>),
     Utf16(Rc<[u16]>),
     Utf32(Rc<[u32]>),
@@ -91,9 +100,9 @@ impl StringKind {
                     .collect(),
             ),
             Self::Utf32(data) => Self::Utf32(
-                data.into_iter()
+                data.iter()
                     .copied()
-                    .chain(utf8.into_iter().map(|i| *i as u32))
+                    .chain(utf8.iter().map(|i| *i as u32))
                     .collect(),
             ),
         }
@@ -191,6 +200,14 @@ pub enum ValueStr {
     Interned(InternedStr),
     Owned(IndexableStr),
 }
+impl ValueStr {
+    pub fn indexable_str(&self) -> &IndexableStr {
+        match self {
+            Self::Interned(interned) => interned.0,
+            Self::Owned(owned) => owned,
+        }
+    }
+}
 impl PartialEq for ValueStr {
     fn eq(&self, other: &Self) -> bool {
         match self {
@@ -208,16 +225,18 @@ impl PartialEq for ValueStr {
 impl Eq for ValueStr {}
 impl Hash for ValueStr {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Self::Interned(interned) => interned.hash(state),
-            Self::Owned(owned) => owned.hash(state),
-        }
+        self.indexable_str().hash(state);
     }
 }
 impl Add for &ValueStr {
     type Output = ValueStr;
     fn add(self, rhs: Self) -> Self::Output {
         ValueStr::Owned(&IndexableStr::from(self.clone()) + &IndexableStr::from(rhs.clone()))
+    }
+}
+impl fmt::Display for ValueStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.indexable_str())
     }
 }
 
@@ -236,9 +255,9 @@ impl StrInterner {
             }
         }
     }
-    fn get_str(&self, str: &IndexableStr) -> Option<InternedStr> {
-        self.strings.get(str).copied()
-    }
+    // fn get_str(&self, str: &IndexableStr) -> Option<InternedStr> {
+    //     self.strings.get(str).copied()
+    // }
 }
 
 thread_local! {
@@ -249,7 +268,7 @@ thread_local! {
 pub struct InternedStr(&'static IndexableStr);
 impl PartialEq for InternedStr {
     fn eq(&self, other: &Self) -> bool {
-        (self.0 as *const _) == (other.0 as *const _)
+        std::ptr::eq(self.0, other.0)
     }
 }
 impl Eq for InternedStr {}

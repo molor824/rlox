@@ -1,5 +1,6 @@
+use crate::interpreter::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
-use crate::interpreter::{bytecode::Bytecode, error::ErrorKind, LocalId};
+use crate::interpreter::FnSignature;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::hash::Hash;
@@ -14,12 +15,18 @@ pub enum Value {
     String(ValueStr),
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<Object>>),
-    Function(Rc<RefCell<Closure>>),
+    Function(Rc<Function>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub signature: Rc<FnSignature>,
+    pub upvalues: Vec<Rc<RefCell<Value>>>,
 }
 
 #[derive(Default, Debug)]
 pub struct Object {
-    map: FxHashMap<Value, Value>,
+    map: FxHashMap<ValueStr, Value>,
     super_obj: Option<Rc<RefCell<Object>>>,
 }
 impl Object {
@@ -29,36 +36,19 @@ impl Object {
             ..Default::default()
         }
     }
-    fn validate_key(key: &Value) -> Result<(), ErrorKind> {
-        match key {
-            Value::Nil => Err(ErrorKind::NilIndexing),
-            Value::Number(num) if num.is_nan() => Err(ErrorKind::NanIndexing),
-            _ => Ok(()),
-        }
-    }
-    pub fn get_property(&self, key: &Value) -> Result<Option<Value>, ErrorKind> {
-        Self::validate_key(key)?;
+    pub fn get_property(&self, key: &ValueStr) -> Result<Value, ErrorKind> {
         if let Some(value) = self.map.get(key) {
-            Ok(Some(value.clone()))
+            Ok(value.clone())
         } else if let Some(super_obj) = &self.super_obj {
             super_obj.borrow().get_property(key)
         } else {
-            Ok(None)
+            Ok(Value::Nil)
         }
     }
-    pub fn set_property(&mut self, key: Value, new_value: Value) -> Result<(), ErrorKind> {
-        Self::validate_key(&key)?;
+    pub fn set_property(&mut self, key: ValueStr, new_value: Value) -> Result<(), ErrorKind> {
         self.map.insert(key, new_value);
         Ok(())
     }
-}
-
-#[derive(Debug)]
-pub struct Closure {
-    min_arity: usize,
-    variadic: bool,
-    upvalues: Vec<LocalId>,
-    body: Vec<Bytecode>,
 }
 
 impl PartialEq for Value {
@@ -98,8 +88,8 @@ impl Hash for Value {
             Self::Number(num) => num.to_bits().hash(state),
             Self::String(str) => str.hash(state),
             Self::Array(arr) => arr.borrow().hash(state),
-            Self::Object(obj) => obj.as_ptr().hash(state),
-            Self::Function(closure) => closure.as_ptr().hash(state),
+            Self::Object(obj) => Rc::as_ptr(obj).hash(state),
+            Self::Function(function) => Rc::as_ptr(function).hash(state),
         }
     }
 }
@@ -247,6 +237,16 @@ impl Value {
         match self {
             Self::Object(obj) => Ok(obj.clone()),
             _ => Err(ErrorKind::InvalidType(self.type_str())),
+        }
+    }
+    pub fn to_bool(&self) -> bool {
+        match self {
+            Self::Nil => false,
+            Self::Number(num) => *num != 0.0,
+            Self::Array(array) => !array.borrow().is_empty(),
+            Self::String(str) => str.indexable_str().len() != 0,
+            Self::Bool(bool) => *bool,
+            Self::Object(_) | Self::Function(_) => true,
         }
     }
 }

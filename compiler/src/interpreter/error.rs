@@ -1,7 +1,6 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::ast::Span;
-use crate::interpreter::LocalId;
+use crate::{ast::Span, interpreter::string::ValueStr};
 
 #[derive(Debug, thiserror::Error)]
 pub struct Error {
@@ -17,10 +16,10 @@ impl fmt::Display for Error {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
-    #[error("local id `{0}` exceeds arity `{1}`")]
-    ArityOverflow(LocalId, usize),
-    #[error("index `{0}` exceeds stack capacity `{1}`")]
-    StackOverflow(usize, usize),
+    #[error("stack overflow")]
+    StackOverflow,
+    #[error("stack underflow")]
+    StackUnderflow,
     #[error("local id out of range")]
     InvalidLocalId,
     #[error("binary operator `{0}` cannot be applied to value of type `{1}` and `{2}`")]
@@ -33,4 +32,6 @@ pub enum ErrorKind {
     NilIndexing,
     #[error("cannot index with nan value")]
     NanIndexing,
+    #[error("attempted to write to read-only global `{0}`")]
+    ReadonlyGlobalWrite(ValueStr),
 }
