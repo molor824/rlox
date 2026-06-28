@@ -187,18 +187,22 @@ pub enum Bytecode {
     Jump(isize), // IP += .0
 
     // Function call
+    // CallSignature { // Implement later when signature based optimization is implemented
+    //     signature: Rc<FnSignature>,
+    //     arity: u32,
+    // },
     Call {
-        procedure: Rc<FnSignature>,
+        src: LocalId,
         arity: u32,
     },
-    CallIndirect {
-        closure: LocalId,
-        arity: u32,
-    },
-    CallIntrinsic {
-        ident: InternedStr,
-        arity: u32,
-    },
+    // CallIntrinsic { // Implement later when built-in method based optimization is implemented
+    //     ident: InternedStr,
+    //     arity: u32,
+    // },
+    // TailCall { // Implement later when tail-call optimization is implemented
+    //     src: LocalId,
+    //     arity: u32,
+    // },
 
     // Return
     Return, // IP = POP()
@@ -417,7 +421,10 @@ impl Bytecode {
             }
             Bytecode::Truncate(new_len) => interpreter.truncate(*new_len)?,
             Bytecode::Return => return Ok(None),
-            _ => todo!(),
+            Bytecode::Call { src, arity } => {
+                let function = interpreter.get_local(*src).try_callable()?;
+                interpreter.call_function(function, *arity as usize)?;
+            }
         }
         Ok(Some(index + 1))
     }
