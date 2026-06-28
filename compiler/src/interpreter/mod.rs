@@ -43,7 +43,6 @@ impl fmt::Debug for FnBody {
 
 pub struct Interpreter {
     memory: Vec<Value>,
-    next_ip: usize,
     current_frame: Option<FunctionFrame>,
     globals: FxHashMap<ValueStr, Value>,
     readonly_globals: FxHashSet<ValueStr>,
@@ -52,7 +51,6 @@ impl Default for Interpreter {
     fn default() -> Self {
         Self {
             memory: Vec::with_capacity(0x100000),
-            next_ip: 0,
             current_frame: None,
             readonly_globals: FxHashSet::default(),
             globals: FxHashMap::default(),
