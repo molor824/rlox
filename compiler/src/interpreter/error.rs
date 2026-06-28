@@ -1,6 +1,6 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::{ast::Span, interpreter::string::ValueStr};
+use crate::{ast::Span, interpreter::{string::ValueStr, value::Value}};
 
 #[derive(Debug, thiserror::Error)]
 pub struct Error {
@@ -26,8 +26,8 @@ pub enum ErrorKind {
     InvalidBinary(&'static str, &'static str, &'static str),
     #[error("unary operator `{0}` cannot be applied to value of type `{1}`")]
     InvalidUnary(&'static str, &'static str),
-    #[error("cannot convert value to type `{0}`")]
-    InvalidType(&'static str),
+    #[error("cannot convert `{0}` to type `{1}`")]
+    InvalidType(Value, &'static str),
     #[error("cannot index with nil value")]
     NilIndexing,
     #[error("cannot index with nan value")]

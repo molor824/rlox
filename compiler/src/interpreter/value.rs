@@ -3,6 +3,7 @@ use crate::interpreter::string::ValueStr;
 use crate::interpreter::FnSignature;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
+use std::fmt;
 use std::hash::Hash;
 use std::{cell::RefCell, rc::Rc};
 
@@ -16,6 +17,52 @@ pub enum Value {
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<Object>>),
     Function(Rc<Function>),
+    Upvalue(Rc<RefCell<Value>>), // NOTE: Must silently loop through inner value on every implementation!
+}
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Nil => write!(f, "nil"),
+            Self::Bool(bool) => write!(f, "{}", bool),
+            Self::Number(num) => write!(f, "{}", num),
+            Self::String(str) => write!(f, "{}", str),
+            Self::Array(arr) => {
+                write!(f, "[")?;
+                for (i, elem) in arr.borrow().iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, "]")
+            }
+            Self::Object(obj) => {
+                write!(f, "{{")?;
+                for (i, (key, value)) in obj.borrow().map.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", key, value)?;
+                }
+                write!(f, "}}")
+            }
+            Self::Function(fun) => {
+                write!(f, "fn({}{})[", fun.signature.min_arity, if fun.signature.variadic {
+                    "..."
+                } else {
+                    ""
+                })?;
+                for (i, upvalue) in fun.upvalues.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", upvalue.borrow())?;
+                }
+                write!(f, "]")
+            }
+            Self::Upvalue(val) => write!(f, "{}", val.borrow()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +100,9 @@ impl Object {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
+        if let Self::Upvalue(other) = other {
+            return self.eq(&other.borrow());
+        }
         match self {
             Self::Nil => matches!(other, Self::Nil),
             Self::Bool(b1) => matches!(other, Self::Bool(b2) if b1 == b2),
@@ -67,29 +117,22 @@ impl PartialEq for Value {
             Self::Function(fn1) => matches!(
                 other, Self::Function(fn2) if Rc::ptr_eq(fn1, fn2)
             ),
+            Self::Upvalue(value) => value.borrow().eq(other),
         }
     }
 }
 impl Eq for Value {}
 impl Hash for Value {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u8(match self {
-            Self::Nil => 0,
-            Self::Bool(_) => 1,
-            Self::Number(_) => 2,
-            Self::String(_) => 3,
-            Self::Array(_) => 4,
-            Self::Object(_) => 5,
-            Self::Function(_) => 6,
-        });
         match self {
             Self::Nil => (),
             Self::Bool(b) => b.hash(state),
             Self::Number(num) => num.to_bits().hash(state),
             Self::String(str) => str.hash(state),
             Self::Array(arr) => arr.borrow().hash(state),
-            Self::Object(obj) => Rc::as_ptr(obj).hash(state),
-            Self::Function(function) => Rc::as_ptr(function).hash(state),
+            Self::Object(obj) => Rc::as_ptr(&obj).hash(state),
+            Self::Function(function) => Rc::as_ptr(&function).hash(state),
+            Self::Upvalue(val) => val.borrow().hash(state),
         }
     }
 }
@@ -103,6 +146,7 @@ impl Value {
             Self::Array(_) => "array",
             Self::Object(_) => "object",
             Self::Function(_) => "function",
+            Self::Upvalue(rf) => rf.borrow().type_str(),
         }
     }
     pub fn try_add(&self, other: &Self) -> Result<Self, ErrorKind> {
@@ -230,13 +274,19 @@ impl Value {
     pub fn try_str(&self) -> Result<ValueStr, ErrorKind> {
         match self {
             Self::String(str) => Ok(str.clone()),
-            _ => Err(ErrorKind::InvalidType(self.type_str())),
+            _ => Err(ErrorKind::InvalidType(self.clone(), "string")),
         }
     }
     pub fn try_obj(&self) -> Result<Rc<RefCell<Object>>, ErrorKind> {
         match self {
             Self::Object(obj) => Ok(obj.clone()),
-            _ => Err(ErrorKind::InvalidType(self.type_str())),
+            _ => Err(ErrorKind::InvalidType(self.clone(), "object")),
+        }
+    }
+    pub fn try_callable(&self) -> Result<Rc<Function>, ErrorKind> {
+        match self {
+            Self::Function(fun) => Ok(fun.clone()),
+            _ => Err(ErrorKind::InvalidType(self.clone(), "function")),
         }
     }
     pub fn to_bool(&self) -> bool {
@@ -247,6 +297,7 @@ impl Value {
             Self::String(str) => str.indexable_str().len() != 0,
             Self::Bool(bool) => *bool,
             Self::Object(_) | Self::Function(_) => true,
+            Self::Upvalue(rf) => rf.borrow().to_bool(),
         }
     }
 }
