@@ -56,7 +56,7 @@ impl fmt::Display for Value {
                     if i != 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", upvalue.borrow())?;
+                    write!(f, "{:?}:{}", upvalue.as_ptr(), upvalue.borrow())?;
                 }
                 write!(f, "]")
             }

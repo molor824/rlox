@@ -225,7 +225,11 @@ impl Interpreter {
                 })
                 .collect::<Vec<_>>();
             let variadic = Value::Array(Rc::new(RefCell::new(array)));
-            self.memory[return_len + signature.arity] = Cell::Value(variadic);
+            let new_index = return_len + signature.arity;
+            if new_index >= self.memory.len() {
+                self.memory.resize_with(new_index + 1, Cell::default);
+            }
+            self.memory[new_index] = Cell::Value(variadic);
         }
         // Truncate until it's no longer past the expected arity
         self.memory
@@ -388,5 +392,82 @@ mod tests {
             a = b;
             b = c;
         }
+    }
+    #[test]
+    fn upvalue_test() {
+        let inc_name = InternedStr::from(IndexableStr::from("inc"));
+        let dec_name = InternedStr::from(IndexableStr::from("dec"));
+
+        #[rustfmt::skip]
+        let inc_bytecode = vec![
+            Bytecode::LoadUpvalue { src: 0, dst: 0 },
+            Bytecode::LoadFloat(1, 1.0),
+            Bytecode::Add { dst: 0, src0: 0, src1: 1 },
+            Bytecode::StoreUpvalue { src: 0, dst: 0 },
+            Bytecode::Return,
+        ];
+        let inc_signature = Rc::new(FnSignature {
+            arity: 0,
+            variadic: false,
+            capture_locations: vec![1],
+            parent_capture_indices: vec![],
+            body: FnBody::Bytecode(inc_bytecode),
+        });
+        #[rustfmt::skip]
+        let dec_bytecode = vec![
+            Bytecode::LoadUpvalue { src: 0, dst: 0 },
+            Bytecode::LoadFloat(1, 1.0),
+            Bytecode::Sub { dst: 0, src0: 0, src1: 1 },
+            Bytecode::StoreUpvalue { src: 0, dst: 0 },
+            Bytecode::Return,
+        ];
+        let dec_signature = Rc::new(FnSignature {
+            arity: 0,
+            variadic: false,
+            capture_locations: vec![1],
+            parent_capture_indices: vec![],
+            body: FnBody::Bytecode(dec_bytecode),
+        });
+        #[rustfmt::skip]
+        let bytecode = vec![
+            Bytecode::LoadFloat(1, 0.0),
+            Bytecode::LoadObject(0, 2),
+            Bytecode::LoadFunction(2, inc_signature.clone()),
+            Bytecode::LoadFunction(3, dec_signature.clone()),
+            Bytecode::StoreProperty { dst: 0, prop: inc_name, src: 2 },
+            Bytecode::StoreProperty { dst: 0, prop: dec_name, src: 3 },
+            Bytecode::Return,
+        ];
+        let signature = Rc::new(FnSignature {
+            arity: 0,
+            variadic: false,
+            capture_locations: vec![],
+            parent_capture_indices: vec![],
+            body: FnBody::Bytecode(bytecode),
+        });
+        let mut interpreter = Interpreter::default();
+        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let result = interpreter.call_and_return(function, []).unwrap();
+
+        let inc = result
+            .get_property(&Value::String(ValueStr::Interned(inc_name)))
+            .unwrap()
+            .as_callable()
+            .unwrap();
+        let dec = result
+            .get_property(&Value::String(ValueStr::Interned(dec_name)))
+            .unwrap()
+            .as_callable()
+            .unwrap();
+        assert_eq!(
+            interpreter.call_and_return(inc, []).unwrap(),
+            Value::Number(1.0)
+        );
+        println!("{}", result);
+        assert_eq!(
+            interpreter.call_and_return(dec, []).unwrap(),
+            Value::Number(0.0)
+        );
+        println!("{}", result);
     }
 }
