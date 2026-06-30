@@ -344,22 +344,23 @@ mod tests {
 
         #[rustfmt::skip]
         let bytecode = vec![
-            Bytecode::LoadFloat(4, 0.0),
-            Bytecode::SetGt { dst: 4, src0: 3, src1: 4 },
-            Bytecode::BrFalse { src: 4, offset: 9 },
-            Bytecode::LoadGlobal { dst: 5, src: name },
-            Bytecode::Clone { dst: 6, src: 2 },
-            Bytecode::Add { dst: 7, src0: 1, src1: 2 },
-            Bytecode::LoadFloat(8, -1.0),
-            Bytecode::Add { dst: 8, src0: 3, src1: 8 },
-            Bytecode::Call { src: 5, arity: 3 },
-            Bytecode::Clone { dst: 0, src: 5 },
-            Bytecode::Return,
+            Bytecode::LoadFloat(2, 1.0),
+            Bytecode::SetLe { dst: 2, src0: 1, src1: 2 },
+            Bytecode::BrFalse { src: 2, offset: 3 },
             Bytecode::Clone { dst: 0, src: 1 },
+            Bytecode::Return,
+            Bytecode::LoadGlobal { dst: 2, src: name },
+            Bytecode::LoadFloat(4, 1.0),
+            Bytecode::Sub { dst: 4, src0: 1, src1: 4 },
+            Bytecode::Call { src: 2, arity: 1 },
+            Bytecode::LoadFloat(5, 2.0),
+            Bytecode::Sub { dst: 5, src0: 1, src1: 5 },
+            Bytecode::Call { src: 2, arity: 1 },
+            Bytecode::Add { dst: 0, src0: 3, src1: 4 },
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
-            arity: 3,
+            arity: 1,
             capture_locations: vec![],
             parent_capture_indices: vec![],
             variadic: false,
@@ -374,16 +375,9 @@ mod tests {
         let mut a = 0.0;
         let mut b = 1.0;
 
-        for i in 0..=20 {
+        for i in 0..=30 {
             let result = interpreter
-                .call_and_return(
-                    function.clone(),
-                    [
-                        Value::Number(0.0),
-                        Value::Number(1.0),
-                        Value::Number(i as f64),
-                    ],
-                )
+                .call_and_return(function.clone(), [Value::Number(i as f64)])
                 .unwrap();
             println!("{}: {}", i, result);
             match result {
