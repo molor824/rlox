@@ -88,34 +88,12 @@ pub enum Bytecode {
     }, // sets false if value is nil, empty array/string, false, zero
 
     // Branching operations
-    BrEq {
-        src0: LocalId,
-        src1: LocalId,
+    BrTrue {
+        src: LocalId,
         offset: isize,
     },
-    BrNe {
-        src0: LocalId,
-        src1: LocalId,
-        offset: isize,
-    },
-    BrLt {
-        src0: LocalId,
-        src1: LocalId,
-        offset: isize,
-    },
-    BrGt {
-        src0: LocalId,
-        src1: LocalId,
-        offset: isize,
-    },
-    BrLe {
-        src0: LocalId,
-        src1: LocalId,
-        offset: isize,
-    },
-    BrGe {
-        src0: LocalId,
-        src1: LocalId,
+    BrFalse {
+        src: LocalId,
         offset: isize,
     },
 
@@ -336,78 +314,45 @@ impl Bytecode {
                 interpreter.make_global_read_only(ValueStr::Interned(*id))
             }
             Bytecode::LoadProperty { dst, src, prop } => {
-                let obj = interpreter.get_local(*src).try_obj()?;
-                let property = obj.borrow().get_property(&ValueStr::Interned(*prop))?;
+                let property = interpreter
+                    .get_local(*src)
+                    .get_property(&Value::String(ValueStr::Interned(*prop)))?;
                 interpreter.set_local(*dst, property)?;
             }
             Bytecode::LoadMethod { dst, src, prop } => {
                 let itself = interpreter.get_local(*src);
                 let function = itself
-                    .try_obj()?
-                    .borrow()
-                    .get_property(&ValueStr::Interned(*prop))?
+                    .get_property(&Value::String(ValueStr::Interned(*prop)))?
                     .try_callable()?;
                 let method = Rc::new(interpreter.method_currying(itself, function)?);
                 interpreter.set_local(*dst, Value::Function(method))?;
             }
             Bytecode::LoadPropertyIndirect { dst, src, prop } => {
-                let obj = interpreter.get_local(*src).try_obj()?;
+                let obj = interpreter.get_local(*src);
                 let key = interpreter.get_local(*prop);
-                let property = obj.borrow().get_property(&key.try_str()?)?;
+                let property = obj.get_property(&key)?;
                 interpreter.set_local(*dst, property)?;
             }
             Bytecode::StoreProperty { dst, src, prop } => {
                 let value = interpreter.get_local(*src);
-                let obj = interpreter.get_local(*dst).try_obj()?;
-                let mut obj = obj.borrow_mut();
-                obj.set_property(ValueStr::Interned(*prop), value)?;
+                let obj = interpreter.get_local(*dst);
+                obj.set_property(Value::String(ValueStr::Interned(*prop)), value)?;
             }
             Bytecode::StorePropertyIndirect { dst, src, prop } => {
                 let value = interpreter.get_local(*src);
-                let obj = interpreter.get_local(*dst).try_obj()?;
+                let obj = interpreter.get_local(*dst);
                 let key = interpreter.get_local(*prop);
-                let mut obj = obj.borrow_mut();
-                obj.set_property(key.try_str()?, value)?;
+                obj.set_property(key, value)?;
             }
-            Bytecode::BrEq { src0, src1, offset } => {
-                let v0 = interpreter.get_local(*src0);
-                let v1 = interpreter.get_local(*src1);
-                if v0 == v1 {
+            Bytecode::BrTrue { src, offset } => {
+                let value = interpreter.get_local(*src);
+                if value.to_bool() {
                     return Ok(Some(((index as isize) + *offset) as usize));
                 }
             }
-            Bytecode::BrNe { src0, src1, offset } => {
-                let v0 = interpreter.get_local(*src0);
-                let v1 = interpreter.get_local(*src1);
-                if v0 != v1 {
-                    return Ok(Some(((index as isize) + *offset) as usize));
-                }
-            }
-            Bytecode::BrLt { src0, src1, offset } => {
-                let v0 = interpreter.get_local(*src0);
-                let v1 = interpreter.get_local(*src1);
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_lt()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
-                }
-            }
-            Bytecode::BrGt { src0, src1, offset } => {
-                let v0 = interpreter.get_local(*src0);
-                let v1 = interpreter.get_local(*src1);
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_gt()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
-                }
-            }
-            Bytecode::BrLe { src0, src1, offset } => {
-                let v0 = interpreter.get_local(*src0);
-                let v1 = interpreter.get_local(*src1);
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_le()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
-                }
-            }
-            Bytecode::BrGe { src0, src1, offset } => {
-                let v0 = interpreter.get_local(*src0);
-                let v1 = interpreter.get_local(*src1);
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_ge()) {
+            Bytecode::BrFalse { src, offset } => {
+                let value = interpreter.get_local(*src);
+                if !value.to_bool() {
                     return Ok(Some(((index as isize) + *offset) as usize));
                 }
             }

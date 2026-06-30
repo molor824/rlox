@@ -70,19 +70,19 @@ pub struct Function {
     pub upvalues: Vec<Rc<RefCell<Value>>>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Object {
-    map: FxHashMap<ValueStr, Value>,
+    map: FxHashMap<Value, Value>,
     super_obj: Option<Rc<RefCell<Object>>>,
 }
 impl Object {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             map: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
-            ..Default::default()
+            super_obj: None,
         }
     }
-    pub fn get_property(&self, key: &ValueStr) -> Result<Value, ErrorKind> {
+    pub fn get_property(&self, key: &Value) -> Result<Value, ErrorKind> {
         if let Some(value) = self.map.get(key) {
             Ok(value.clone())
         } else if let Some(super_obj) = &self.super_obj {
@@ -91,7 +91,7 @@ impl Object {
             Ok(Value::Nil)
         }
     }
-    pub fn set_property(&mut self, key: ValueStr, new_value: Value) -> Result<(), ErrorKind> {
+    pub fn set_property(&mut self, key: Value, new_value: Value) -> Result<(), ErrorKind> {
         self.map.insert(key, new_value);
         Ok(())
     }
@@ -270,10 +270,36 @@ impl Value {
             _ => Err(ErrorKind::InvalidType(self.clone(), "string")),
         }
     }
-    pub fn try_obj(&self) -> Result<Rc<RefCell<Object>>, ErrorKind> {
+    pub fn get_property(&self, key: &Value) -> Result<Value, ErrorKind> {
         match self {
-            Self::Object(obj) => Ok(obj.clone()),
-            _ => Err(ErrorKind::InvalidType(self.clone(), "object")),
+            Self::Array(array) => match key {
+                Self::Number(index) => Ok(array
+                    .borrow()
+                    .get(*index as usize)
+                    .cloned()
+                    .unwrap_or_default()),
+                _ => Err(ErrorKind::InvalidArrayIndex),
+            },
+            Self::Object(obj) => Ok(obj.borrow().get_property(key)?),
+            _ => Err(ErrorKind::InvalidPropertyAccess),
+        }
+    }
+    pub fn set_property(&self, key: Value, new_value: Value) -> Result<(), ErrorKind> {
+        match self {
+            Self::Array(array) => match key {
+                Self::Number(index) => {
+                    let index = index as usize;
+                    let mut array = array.borrow_mut();
+                    if array.len() <= index {
+                        array.resize_with(index + 1, Default::default);
+                    }
+                    array[index] = new_value;
+                    Ok(())
+                }
+                _ => Err(ErrorKind::InvalidArrayIndex),
+            },
+            Self::Object(obj) => Ok(obj.borrow_mut().set_property(key, new_value)?),
+            _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }
     pub fn try_callable(&self) -> Result<Rc<Function>, ErrorKind> {

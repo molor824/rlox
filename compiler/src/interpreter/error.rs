@@ -39,4 +39,8 @@ pub enum ErrorKind {
     ReadonlyGlobalWrite(ValueStr),
     #[error("attempted to share a memory that is not initialized")]
     UninitCellShare,
+    #[error("attempted to index array with non-number value")]
+    InvalidArrayIndex,
+    #[error("attempted to access property of value whose type is not object or array")]
+    InvalidPropertyAccess,
 }
