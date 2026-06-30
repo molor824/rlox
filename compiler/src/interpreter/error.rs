@@ -1,6 +1,9 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
-use crate::{ast::Span, interpreter::{string::ValueStr, value::Value}};
+use crate::{
+    ast::Span,
+    interpreter::{string::ValueStr, value::Value},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub struct Error {
@@ -34,4 +37,6 @@ pub enum ErrorKind {
     NanIndexing,
     #[error("attempted to write to read-only global `{0}`")]
     ReadonlyGlobalWrite(ValueStr),
+    #[error("attempted to share a memory that is not initialized")]
+    UninitCellShare,
 }

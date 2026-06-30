@@ -138,9 +138,6 @@ pub enum Bytecode {
     }, // GLOBAL[[.0]] = [.1]
     GlobalReadOnly(InternedStr), // make GLOBAL[.0] read-only
 
-    // Special
-    LoadArity(LocalId), // [.0] = len(ARGS)
-
     // Memory
     Clone {
         dst: LocalId,
@@ -300,10 +297,6 @@ impl Bytecode {
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_ge())),
                 )?;
             }
-            Bytecode::LoadArity(id) => interpreter.set_local(
-                *id,
-                Value::Number(interpreter.current_frame.as_ref().unwrap().arity as f64),
-            )?,
             Bytecode::LoadNil(id) => interpreter.set_local(*id, Value::Nil)?,
             Bytecode::LoadFloat(id, float) => interpreter.set_local(*id, Value::Number(*float))?,
             Bytecode::LoadStr(id, str) => {
@@ -349,7 +342,11 @@ impl Bytecode {
             }
             Bytecode::LoadMethod { dst, src, prop } => {
                 let itself = interpreter.get_local(*src);
-                let function = itself.try_obj()?.borrow().get_property(&ValueStr::Interned(*prop))?.try_callable()?;
+                let function = itself
+                    .try_obj()?
+                    .borrow()
+                    .get_property(&ValueStr::Interned(*prop))?
+                    .try_callable()?;
                 let method = Rc::new(interpreter.method_currying(itself, function)?);
                 interpreter.set_local(*dst, Value::Function(method))?;
             }

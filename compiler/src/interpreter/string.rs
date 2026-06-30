@@ -74,75 +74,75 @@ impl Add for &IndexableStr {
 
 #[derive(Clone, PartialEq, Eq)]
 enum StringKind {
-    Utf8(Rc<[u8]>),
-    Utf16(Rc<[u16]>),
-    Utf32(Rc<[u32]>),
+    Utf8(Rc<Vec<u8>>),
+    Utf16(Rc<Vec<u16>>),
+    Utf32(Rc<Vec<u32>>),
 }
 impl StringKind {
     fn from_str_as_utf8(str: &str) -> Self {
-        Self::Utf8(str.bytes().collect())
+        Self::Utf8(Rc::new(str.as_bytes().to_vec()))
     }
     fn from_str_as_utf16(str: &str) -> Self {
-        Self::Utf16(str.encode_utf16().collect())
+        Self::Utf16(Rc::new(str.encode_utf16().collect()))
     }
     fn from_str_as_utf32(str: &str) -> Self {
-        Self::Utf32(str.chars().map(|ch| ch as u32).collect())
+        Self::Utf32(Rc::new(str.chars().map(|ch| ch as u32).collect()))
     }
     fn concat_utf8(&self, utf8: &[u8]) -> Self {
         match self {
-            Self::Utf8(data) => {
-                Self::Utf8(data.iter().copied().chain(utf8.iter().copied()).collect())
-            }
-            Self::Utf16(data) => Self::Utf16(
+            Self::Utf8(data) => Self::Utf8(Rc::new(
+                data.iter().copied().chain(utf8.iter().copied()).collect(),
+            )),
+            Self::Utf16(data) => Self::Utf16(Rc::new(
                 data.iter()
                     .copied()
                     .chain(utf8.iter().map(|i| *i as u16))
                     .collect(),
-            ),
-            Self::Utf32(data) => Self::Utf32(
+            )),
+            Self::Utf32(data) => Self::Utf32(Rc::new(
                 data.iter()
                     .copied()
                     .chain(utf8.iter().map(|i| *i as u32))
                     .collect(),
-            ),
+            )),
         }
     }
     fn concat_utf16(&self, utf16: &[u16]) -> Self {
         match self {
-            Self::Utf8(data) => Self::Utf16(
+            Self::Utf8(data) => Self::Utf16(Rc::new(
                 data.iter()
                     .map(|d| *d as u16)
                     .chain(utf16.iter().copied())
                     .collect(),
-            ),
-            Self::Utf16(data) => {
-                Self::Utf16(data.iter().copied().chain(utf16.iter().copied()).collect())
-            }
-            Self::Utf32(data) => Self::Utf32(
+            )),
+            Self::Utf16(data) => Self::Utf16(Rc::new(
+                data.iter().copied().chain(utf16.iter().copied()).collect(),
+            )),
+            Self::Utf32(data) => Self::Utf32(Rc::new(
                 data.iter()
                     .copied()
                     .chain(utf16.iter().map(|d| *d as u32))
                     .collect(),
-            ),
+            )),
         }
     }
     fn concat_utf32(&self, utf32: &[u32]) -> Self {
         match self {
-            Self::Utf8(data) => Self::Utf32(
+            Self::Utf8(data) => Self::Utf32(Rc::new(
                 data.iter()
                     .map(|d| *d as u32)
                     .chain(utf32.iter().copied())
                     .collect(),
-            ),
-            Self::Utf16(data) => Self::Utf32(
+            )),
+            Self::Utf16(data) => Self::Utf32(Rc::new(
                 data.iter()
                     .map(|d| *d as u32)
                     .chain(utf32.iter().copied())
                     .collect(),
-            ),
-            Self::Utf32(data) => {
-                Self::Utf32(data.iter().copied().chain(utf32.iter().copied()).collect())
-            }
+            )),
+            Self::Utf32(data) => Self::Utf32(Rc::new(
+                data.iter().copied().chain(utf32.iter().copied()).collect(),
+            )),
         }
     }
 }

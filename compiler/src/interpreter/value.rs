@@ -17,7 +17,6 @@ pub enum Value {
     Array(Rc<RefCell<Vec<Value>>>),
     Object(Rc<RefCell<Object>>),
     Function(Rc<Function>),
-    Upvalue(Rc<RefCell<Value>>), // NOTE: Must silently loop through inner value on every implementation!
 }
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -47,11 +46,12 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Self::Function(fun) => {
-                write!(f, "fn({}{})[", fun.signature.min_arity, if fun.signature.variadic {
-                    "..."
-                } else {
-                    ""
-                })?;
+                write!(
+                    f,
+                    "fn({}{})[",
+                    fun.signature.arity,
+                    if fun.signature.variadic { "..." } else { "" }
+                )?;
                 for (i, upvalue) in fun.upvalues.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
@@ -60,7 +60,6 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Self::Upvalue(val) => write!(f, "{}", val.borrow()),
         }
     }
 }
@@ -100,9 +99,6 @@ impl Object {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
-        if let Self::Upvalue(other) = other {
-            return self.eq(&other.borrow());
-        }
         match self {
             Self::Nil => matches!(other, Self::Nil),
             Self::Bool(b1) => matches!(other, Self::Bool(b2) if b1 == b2),
@@ -117,7 +113,6 @@ impl PartialEq for Value {
             Self::Function(fn1) => matches!(
                 other, Self::Function(fn2) if Rc::ptr_eq(fn1, fn2)
             ),
-            Self::Upvalue(value) => value.borrow().eq(other),
         }
     }
 }
@@ -130,9 +125,8 @@ impl Hash for Value {
             Self::Number(num) => num.to_bits().hash(state),
             Self::String(str) => str.hash(state),
             Self::Array(arr) => arr.borrow().hash(state),
-            Self::Object(obj) => Rc::as_ptr(&obj).hash(state),
-            Self::Function(function) => Rc::as_ptr(&function).hash(state),
-            Self::Upvalue(val) => val.borrow().hash(state),
+            Self::Object(obj) => Rc::as_ptr(obj).hash(state),
+            Self::Function(function) => Rc::as_ptr(function).hash(state),
         }
     }
 }
@@ -146,7 +140,6 @@ impl Value {
             Self::Array(_) => "array",
             Self::Object(_) => "object",
             Self::Function(_) => "function",
-            Self::Upvalue(rf) => rf.borrow().type_str(),
         }
     }
     pub fn try_add(&self, other: &Self) -> Result<Self, ErrorKind> {
@@ -297,7 +290,6 @@ impl Value {
             Self::String(str) => str.indexable_str().len() != 0,
             Self::Bool(bool) => *bool,
             Self::Object(_) | Self::Function(_) => true,
-            Self::Upvalue(rf) => rf.borrow().to_bool(),
         }
     }
 }
