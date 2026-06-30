@@ -43,4 +43,6 @@ pub enum ErrorKind {
     InvalidArrayIndex,
     #[error("attempted to access property of value whose type is not object or array")]
     InvalidPropertyAccess,
+    #[error("attempted to access non-existent upvalue")]
+    InvalidUpvalueAccess,
 }

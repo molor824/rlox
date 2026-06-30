@@ -56,6 +56,11 @@ enum Cell {
     Value(Value),
     Upvalue(Rc<RefCell<Value>>),
 }
+impl Default for Cell {
+    fn default() -> Self {
+        Self::Value(Value::Nil)
+    }
+}
 pub struct Interpreter {
     memory: Vec<Cell>,
     current_frame: Option<FunctionFrame>,
@@ -88,7 +93,7 @@ impl Interpreter {
             return Err(ErrorKind::StackOverflow);
         }
         if index >= self.memory.len() {
-            self.memory.resize(index + 1, Cell::Value(Value::Nil));
+            self.memory.resize_with(index + 1, Cell::default);
         }
         match &mut self.memory[index] {
             Cell::Upvalue(up) => *up.borrow_mut() = new_value,
@@ -109,6 +114,10 @@ impl Interpreter {
             },
             None => Err(ErrorKind::UninitCellShare),
         }
+    }
+    fn get_upvalue(&self, id: LocalId) -> Option<Rc<RefCell<Value>>> {
+        let fun = self.current_frame.as_ref().unwrap().function.as_ref();
+        fun.upvalues.get(id as usize).cloned()
     }
     fn make_global_read_only(&mut self, id: ValueStr) {
         self.readonly_globals.insert(id);
@@ -223,5 +232,167 @@ impl Interpreter {
             .truncate(return_len + signature.required_arity());
 
         self.call_function_exact(function)
+    }
+    pub fn call_and_return(
+        &mut self,
+        function: Rc<Function>,
+        args: impl IntoIterator<Item = Value>,
+    ) -> Result<Value, ErrorKind> {
+        self.memory.push(Cell::default());
+        let mut arity = 0;
+        for arg in args {
+            self.memory.push(Cell::Value(arg));
+            arity += 1;
+        }
+        self.call_function(function, arity)?;
+        Ok(match self.memory.pop().unwrap() {
+            Cell::Value(val) => val,
+            Cell::Upvalue(upval) => upval.borrow().clone(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::interpreter::{
+        bytecode::Bytecode,
+        string::{IndexableStr, InternedStr, ValueStr},
+        value::Value,
+        FnBody, FnSignature, Interpreter,
+    };
+
+    #[test]
+    fn basic_function() {
+        let signature = Rc::new(FnSignature {
+            arity: 2,
+            variadic: false,
+            body: FnBody::Bytecode(vec![
+                Bytecode::Add {
+                    dst: 0,
+                    src0: 1,
+                    src1: 2,
+                },
+                Bytecode::Return,
+            ]),
+            capture_locations: vec![],
+            parent_capture_indices: vec![],
+        });
+        let mut interpreter = Interpreter::default();
+        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let result = interpreter
+            .call_and_return(function, [Value::Number(1.0), Value::Number(2.0)])
+            .unwrap();
+        println!("{}", result);
+        match result {
+            Value::Number(n) => assert_eq!(n, 3.0),
+            _ => panic!("Invalid type"),
+        }
+    }
+    #[test]
+    fn fibonacci_iterative() {
+        #[rustfmt::skip]
+        let bytecode = vec![
+            Bytecode::LoadFloat(2, 0.0),
+            Bytecode::LoadFloat(3, 1.0),
+            Bytecode::LoadFloat(4, 0.0),
+            // While start
+            Bytecode::SetLt { src0: 4, src1: 1, dst: 5},
+            Bytecode::BrFalse { src: 5, offset: 7 },
+            Bytecode::Add { src0: 2, src1: 3, dst: 5},
+            Bytecode::Clone { dst: 2, src: 3 },
+            Bytecode::Clone { dst: 3, src: 5 },
+            Bytecode::LoadFloat(6, 1.0),
+            Bytecode::Add { src0: 4, src1: 6, dst: 4 },
+            Bytecode::Jump(-7),
+            // While end
+            Bytecode::Truncate(5),
+            Bytecode::Clone { src: 2, dst: 0 },
+            Bytecode::Return,
+        ];
+        let signature = Rc::new(FnSignature {
+            arity: 1,
+            variadic: false,
+            capture_locations: vec![],
+            parent_capture_indices: vec![],
+            body: FnBody::Bytecode(bytecode),
+        });
+        let mut interpreter = Interpreter::default();
+        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let results = (0..=20).map(|i| {
+            interpreter
+                .call_and_return(function.clone(), [Value::Number(i as f64)])
+                .unwrap()
+        });
+        let mut a = 0.0;
+        let mut b = 1.0;
+        for (i, result) in results.enumerate() {
+            println!("{}: {}", i, result);
+            match result {
+                Value::Number(num) => assert_eq!(num, a),
+                _ => panic!("Invalid type"),
+            }
+            let c = a + b;
+            a = b;
+            b = c;
+        }
+    }
+    #[test]
+    fn fibonacci_recursive() {
+        let name = InternedStr::from(IndexableStr::from("fib"));
+
+        #[rustfmt::skip]
+        let bytecode = vec![
+            Bytecode::LoadFloat(4, 0.0),
+            Bytecode::SetGt { dst: 4, src0: 3, src1: 4 },
+            Bytecode::BrFalse { src: 4, offset: 9 },
+            Bytecode::LoadGlobal { dst: 5, src: name },
+            Bytecode::Clone { dst: 6, src: 2 },
+            Bytecode::Add { dst: 7, src0: 1, src1: 2 },
+            Bytecode::LoadFloat(8, -1.0),
+            Bytecode::Add { dst: 8, src0: 3, src1: 8 },
+            Bytecode::Call { src: 5, arity: 3 },
+            Bytecode::Clone { dst: 0, src: 5 },
+            Bytecode::Return,
+            Bytecode::Clone { dst: 0, src: 1 },
+            Bytecode::Return,
+        ];
+        let signature = Rc::new(FnSignature {
+            arity: 3,
+            capture_locations: vec![],
+            parent_capture_indices: vec![],
+            variadic: false,
+            body: FnBody::Bytecode(bytecode),
+        });
+        let mut interpreter = Interpreter::default();
+        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        interpreter
+            .set_global(ValueStr::Interned(name), Value::Function(function.clone()))
+            .unwrap();
+
+        let mut a = 0.0;
+        let mut b = 1.0;
+
+        for i in 0..=20 {
+            let result = interpreter
+                .call_and_return(
+                    function.clone(),
+                    [
+                        Value::Number(0.0),
+                        Value::Number(1.0),
+                        Value::Number(i as f64),
+                    ],
+                )
+                .unwrap();
+            println!("{}: {}", i, result);
+            match result {
+                Value::Number(n) => assert_eq!(n, a),
+                _ => panic!("Invalid type"),
+            }
+            let c = a + b;
+            a = b;
+            b = c;
+        }
     }
 }

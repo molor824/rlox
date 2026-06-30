@@ -149,6 +149,14 @@ pub enum Bytecode {
         prop: LocalId,
         src: LocalId,
     }, // [.0][[.1]] = [.2] --- Equivalent to a[b] = c
+    LoadUpvalue {
+        src: LocalId,
+        dst: LocalId,
+    },
+    StoreUpvalue {
+        src: LocalId,
+        dst: LocalId,
+    },
 
     // Creating custom types
     LoadNil(LocalId),                       // [.0] = nil
@@ -227,11 +235,11 @@ impl Bytecode {
             }
             Bytecode::SetTrue { dst, src } => {
                 let value = interpreter.get_local(*src);
-                interpreter.set_local(*dst, Value::Bool(value.to_bool()))?;
+                interpreter.set_local(*dst, Value::Bool(value.as_bool()))?;
             }
             Bytecode::SetFalse { dst, src } => {
                 let value = interpreter.get_local(*src);
-                interpreter.set_local(*dst, Value::Bool(!value.to_bool()))?;
+                interpreter.set_local(*dst, Value::Bool(!value.as_bool()))?;
             }
             Bytecode::SetEq { dst, src0, src1 } => {
                 let v0 = interpreter.get_local(*src0);
@@ -323,7 +331,7 @@ impl Bytecode {
                 let itself = interpreter.get_local(*src);
                 let function = itself
                     .get_property(&Value::String(ValueStr::Interned(*prop)))?
-                    .try_callable()?;
+                    .as_callable()?;
                 let method = Rc::new(interpreter.method_currying(itself, function)?);
                 interpreter.set_local(*dst, Value::Function(method))?;
             }
@@ -344,15 +352,29 @@ impl Bytecode {
                 let key = interpreter.get_local(*prop);
                 obj.set_property(key, value)?;
             }
+            Bytecode::LoadUpvalue { src, dst } => {
+                let upvalue = interpreter
+                    .get_upvalue(*src)
+                    .map(|value| value.borrow().clone())
+                    .unwrap_or_default();
+                interpreter.set_local(*dst, upvalue)?;
+            }
+            Bytecode::StoreUpvalue { src, dst } => {
+                let value = interpreter.get_local(*src);
+                match interpreter.get_upvalue(*dst) {
+                    Some(upvalue) => *upvalue.borrow_mut() = value,
+                    None => return Err(ErrorKind::InvalidUpvalueAccess),
+                }
+            }
             Bytecode::BrTrue { src, offset } => {
                 let value = interpreter.get_local(*src);
-                if value.to_bool() {
+                if value.as_bool() {
                     return Ok(Some(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrFalse { src, offset } => {
                 let value = interpreter.get_local(*src);
-                if !value.to_bool() {
+                if !value.as_bool() {
                     return Ok(Some(((index as isize) + *offset) as usize));
                 }
             }
@@ -364,7 +386,7 @@ impl Bytecode {
             Bytecode::Truncate(new_len) => interpreter.truncate(*new_len)?,
             Bytecode::Return => return Ok(None),
             Bytecode::Call { src, arity } => {
-                let function = interpreter.get_local(*src).try_callable()?;
+                let function = interpreter.get_local(*src).as_callable()?;
                 interpreter.call_function(function, *arity as usize)?;
             }
         }

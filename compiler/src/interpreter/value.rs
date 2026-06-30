@@ -302,13 +302,13 @@ impl Value {
             _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }
-    pub fn try_callable(&self) -> Result<Rc<Function>, ErrorKind> {
+    pub fn as_callable(&self) -> Result<Rc<Function>, ErrorKind> {
         match self {
             Self::Function(fun) => Ok(fun.clone()),
             _ => Err(ErrorKind::InvalidType(self.clone(), "function")),
         }
     }
-    pub fn to_bool(&self) -> bool {
+    pub fn as_bool(&self) -> bool {
         match self {
             Self::Nil => false,
             Self::Number(num) => *num != 0.0,
