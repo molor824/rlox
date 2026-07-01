@@ -1,4 +1,4 @@
-use crate::interpreter::error::ErrorKind;
+use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
 use crate::interpreter::FnSignature;
 use rustc_hash::FxHashMap;
@@ -267,7 +267,7 @@ impl Value {
     pub fn try_str(&self) -> Result<ValueStr, ErrorKind> {
         match self {
             Self::String(str) => Ok(str.clone()),
-            _ => Err(ErrorKind::InvalidType(self.clone(), "string")),
+            _ => Err(ErrorKind::InvalidType(self.type_str(), "string")),
         }
     }
     pub fn get_property(&self, key: &Value) -> Result<Value, ErrorKind> {
@@ -305,7 +305,7 @@ impl Value {
     pub fn as_callable(&self) -> Result<Rc<Function>, ErrorKind> {
         match self {
             Self::Function(fun) => Ok(fun.clone()),
-            _ => Err(ErrorKind::InvalidType(self.clone(), "function")),
+            _ => Err(ErrorKind::InvalidType(self.type_str(), "function")),
         }
     }
     pub fn as_bool(&self) -> bool {

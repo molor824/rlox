@@ -1,4 +1,7 @@
-use crate::ast::{expression::*, *};
+use crate::{
+    ast::{expression::*, *},
+    span::{GetSpan, SpanOf},
+};
 
 impl<R: BufRead> Parser<R> {
     fn next_params(&mut self) -> Result<(Vec<SourceSpan>, Option<SpanOf<SourceSpan>>)> {

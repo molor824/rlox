@@ -1,4 +1,4 @@
-use crate::interpreter::error::ErrorKind;
+use crate::error::ErrorKind;
 use crate::interpreter::string::{InternedStr, ValueStr};
 use crate::interpreter::value::{Object, Value};
 use crate::interpreter::{FnSignature, Interpreter, LocalId};

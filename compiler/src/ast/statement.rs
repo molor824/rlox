@@ -1,4 +1,7 @@
-use crate::ast::{expression::*, *};
+use crate::{
+    ast::{expression::*, *},
+    span::GetSpan,
+};
 
 pub fn print_indent(statements: &[Statement], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     for statement in statements {

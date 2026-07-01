@@ -1,4 +1,4 @@
-use crate::ast::expression::Expression;
+use crate::{ast::expression::Expression, span::SpanOf};
 
 use super::*;
 

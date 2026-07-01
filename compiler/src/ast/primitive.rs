@@ -1,6 +1,9 @@
 use num_bigint::BigInt;
 
-use crate::ast::{expression::*, *};
+use crate::{
+    ast::{expression::*, *},
+    span::SpanOf,
+};
 
 impl<R: BufRead> Parser<R> {
     // Every following digit after the first can have one underscore

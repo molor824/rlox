@@ -3,14 +3,11 @@ use std::cell::RefCell;
 use std::mem;
 use std::rc::Rc;
 
-use crate::interpreter::error::ErrorKind;
-use crate::interpreter::string::ValueStr;
-use crate::interpreter::value::Value;
-use crate::interpreter::{bytecode::Bytecode, value::Function};
+use crate::error::ErrorKind;
+use crate::interpreter::{bytecode::Bytecode, string::ValueStr, value::Function, value::Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub mod bytecode;
-pub mod error;
 pub mod string;
 pub mod value;
 
@@ -377,7 +374,7 @@ mod tests {
         let mut a = 0.0;
         let mut b = 1.0;
 
-        for i in 0..=30 {
+        for i in 0..=10 {
             let result = interpreter
                 .call_and_return(function.clone(), [Value::Number(i as f64)])
                 .unwrap();

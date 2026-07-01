@@ -2,9 +2,12 @@ use std::cell::Ref;
 
 use num_bigint::BigInt;
 
-use crate::ast::{
-    statement::{print_indent, Statement},
-    *,
+use crate::{
+    ast::{
+        statement::{print_indent, Statement},
+        *,
+    },
+    span::{GetSpan, SpanOf},
 };
 
 impl<R: BufRead> Parser<R> {

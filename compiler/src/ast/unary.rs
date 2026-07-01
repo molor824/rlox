@@ -1,4 +1,7 @@
-use crate::ast::{expression::*, *};
+use crate::{
+    ast::{expression::*, *},
+    span::GetSpan,
+};
 
 impl<R: BufRead> Parser<R> {
     fn next_postfix_operators(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
