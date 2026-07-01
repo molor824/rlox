@@ -324,14 +324,12 @@ mod tests {
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
-        let results = (0..=20).map(|i| {
-            interpreter
-                .call_and_return(function.clone(), [Value::Number(i as f64)])
-                .unwrap()
-        });
         let mut a = 0.0;
         let mut b = 1.0;
-        for (i, result) in results.enumerate() {
+        for i in 0..=100 {
+            let result = interpreter
+                .call_and_return(function.clone(), [Value::Number(i as f64)])
+                .unwrap();
             println!("{}: {}", i, result);
             match result {
                 Value::Number(num) => assert_eq!(num, a),
