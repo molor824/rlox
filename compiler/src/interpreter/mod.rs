@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use crate::error::ErrorKind;
 use crate::interpreter::{bytecode::Bytecode, string::ValueStr, value::Function, value::Value};
+use crate::span::SpanOf;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub mod bytecode;
@@ -33,7 +34,7 @@ impl FnSignature {
 }
 
 pub enum FnBody {
-    Bytecode(Vec<Bytecode>),
+    Bytecode(Vec<SpanOf<Bytecode>>),
     Builtin(Box<dyn Fn(&mut Interpreter) -> Result<(), ErrorKind>>),
 }
 impl fmt::Debug for FnBody {
@@ -58,6 +59,7 @@ impl Default for Cell {
         Self::Value(Value::Nil)
     }
 }
+
 pub struct Interpreter {
     memory: Vec<Cell>,
     current_frame: Option<FunctionFrame>,
@@ -112,9 +114,21 @@ impl Interpreter {
             None => Err(ErrorKind::UninitCellShare),
         }
     }
-    fn get_upvalue(&self, id: LocalId) -> Option<Rc<RefCell<Value>>> {
+    fn get_upvalue(&self, id: LocalId) -> Value {
         let fun = self.current_frame.as_ref().unwrap().function.as_ref();
-        fun.upvalues.get(id as usize).cloned()
+        fun.upvalues
+            .get(id as usize)
+            .map(|upvalue| upvalue.borrow().clone())
+            .unwrap_or_default()
+    }
+    fn set_upvalue(&self, id: LocalId, new_value: Value) -> Result<(), ErrorKind> {
+        let fun = self.current_frame.as_ref().unwrap().function.as_ref();
+        if let Some(v) = fun.upvalues.get(id as usize) {
+            *v.borrow_mut() = new_value;
+            Ok(())
+        } else {
+            Err(ErrorKind::InvalidUpvalueAccess)
+        }
     }
     fn make_global_read_only(&mut self, id: ValueStr) {
         self.readonly_globals.insert(id);
@@ -193,7 +207,7 @@ impl Interpreter {
             FnBody::Builtin(builtin) => builtin(self)?,
             FnBody::Bytecode(bytecodes) => {
                 let mut index = 0;
-                while let Some(next) = bytecodes[index].interpret(self, index)? {
+                while let Some(next) = bytecodes[index].1.interpret(self, index)? {
                     index = next;
                 }
             }
@@ -257,11 +271,14 @@ impl Interpreter {
 mod tests {
     use std::rc::Rc;
 
-    use crate::interpreter::{
-        bytecode::Bytecode,
-        string::{IndexableStr, InternedStr, ValueStr},
-        value::Value,
-        FnBody, FnSignature, Interpreter,
+    use crate::{
+        interpreter::{
+            bytecode::Bytecode,
+            string::{IndexableStr, InternedStr, ValueStr},
+            value::Value,
+            FnBody, FnSignature, Interpreter,
+        },
+        span::{Span, SpanOf},
     };
 
     #[test]
@@ -269,14 +286,18 @@ mod tests {
         let signature = Rc::new(FnSignature {
             arity: 2,
             variadic: false,
-            body: FnBody::Bytecode(vec![
-                Bytecode::Add {
-                    dst: 0,
-                    src0: 1,
-                    src1: 2,
-                },
-                Bytecode::Return,
-            ]),
+            body: FnBody::Bytecode(
+                [
+                    Bytecode::Add {
+                        dst: 0,
+                        src0: 1,
+                        src1: 2,
+                    },
+                    Bytecode::Return,
+                ]
+                .map(|bc| SpanOf(Span::default(), bc))
+                .to_vec(),
+            ),
             capture_locations: vec![],
             parent_capture_indices: vec![],
         });
@@ -317,7 +338,12 @@ mod tests {
             variadic: false,
             capture_locations: vec![],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(bytecode),
+            body: FnBody::Bytecode(
+                bytecode
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+            ),
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
@@ -363,7 +389,12 @@ mod tests {
             capture_locations: vec![],
             parent_capture_indices: vec![],
             variadic: false,
-            body: FnBody::Bytecode(bytecode),
+            body: FnBody::Bytecode(
+                bytecode
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+            ),
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
@@ -406,7 +437,12 @@ mod tests {
             variadic: false,
             capture_locations: vec![1],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(inc_bytecode),
+            body: FnBody::Bytecode(
+                inc_bytecode
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+            ),
         });
         #[rustfmt::skip]
         let dec_bytecode = vec![
@@ -421,7 +457,12 @@ mod tests {
             variadic: false,
             capture_locations: vec![1],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(dec_bytecode),
+            body: FnBody::Bytecode(
+                dec_bytecode
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+            ),
         });
         #[rustfmt::skip]
         let bytecode = vec![
@@ -438,7 +479,12 @@ mod tests {
             variadic: false,
             capture_locations: vec![],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(bytecode),
+            body: FnBody::Bytecode(
+                bytecode
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+            ),
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());

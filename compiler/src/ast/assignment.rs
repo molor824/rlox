@@ -63,13 +63,13 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(fn_kwd.0.concat(paren_end), ErrorKind::ExpectedFuncBody));
         };
 
-        Ok(Some(Expression::FunctionDecl {
+        Ok(Some(Expression::FunctionDecl(FunctionDecl {
             fn_keyword: fn_kwd.0,
             ident,
-            params,
+            params: SpanOf(paren_start.concat(paren_end), params),
             variadic,
             body,
-        }))
+        })))
     }
     pub fn next_var_decl(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let Some(var_kwd) = self.next_keywords(["let", "const"], skip_newline)? else {

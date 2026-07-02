@@ -19,6 +19,14 @@ impl<R: BufRead> Parser<R> {
 }
 
 #[derive(Debug)]
+pub struct FunctionDecl {
+    pub fn_keyword: Span,
+    pub ident: Option<SourceSpan>,
+    pub params: SpanOf<Vec<SourceSpan>>,
+    pub variadic: Option<SpanOf<SourceSpan>>,
+    pub body: FunctionBody,
+}
+#[derive(Debug)]
 pub enum Expression {
     Ident(SourceSpan),
     String(SpanOf<String>),
@@ -44,13 +52,7 @@ pub enum Expression {
         assignee: Assignee,
         assigner: Box<Expression>,
     },
-    FunctionDecl {
-        fn_keyword: Span,
-        ident: Option<SourceSpan>, // Closure if None
-        params: Vec<SourceSpan>,
-        variadic: Option<SpanOf<SourceSpan>>, // span covers *ident
-        body: FunctionBody,
-    },
+    FunctionDecl(FunctionDecl),
     VarDecl {
         keyword: SourceSpan,
         ident: SourceSpan,
@@ -91,26 +93,26 @@ impl fmt::Display for Expression {
                 right_operand,
             } => write!(f, "({left_operand}) {} ({right_operand})", operator.1),
             Self::Assign { assignee, assigner } => write!(f, "({assignee}) = ({assigner})"),
-            Self::FunctionDecl {
+            Self::FunctionDecl(FunctionDecl {
                 ident,
                 params,
                 variadic,
                 body,
                 ..
-            } => {
+            }) => {
                 write!(f, "fn")?;
                 if let Some(ident) = ident {
                     write!(f, " {}", ident)?;
                 }
                 write!(f, "(")?;
-                for (i, param) in params.iter().enumerate() {
+                for (i, param) in params.1.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
                     }
                     write!(f, "{}", param)?;
                 }
                 if let Some(variadic) = variadic {
-                    if !params.is_empty() {
+                    if !params.1.is_empty() {
                         write!(f, ", ")?;
                     }
                     write!(f, "*{}", variadic.1)?;
@@ -146,9 +148,9 @@ impl GetSpan for Expression {
                 .concat(right_operand.span())
                 .concat(operator.0),
             Self::Assign { assignee, assigner } => assignee.span().concat(assigner.span()),
-            Self::FunctionDecl {
+            Self::FunctionDecl(FunctionDecl {
                 body, fn_keyword, ..
-            } => fn_keyword.concat(body.span()),
+            }) => fn_keyword.concat(body.span()),
             Self::VarDecl {
                 keyword, assigner, ..
             } => keyword.0.concat(assigner.span()),
