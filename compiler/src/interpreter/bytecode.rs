@@ -74,8 +74,8 @@ pub enum Bytecode {
     // Unary operations
     Negate { dst: Store, src: Load },
     Invert { dst: Store, src: Load },
-    SetTrue { dst: Store, src: Load }, // sets true if value is object, array/string with content, true, non zero number
-    SetFalse { dst: Store, src: Load }, // sets false if value is nil, empty array/string, false, zero
+    SetTrue { dst: Store, src: Load },
+    SetFalse { dst: Store, src: Load },
 
     // Branching operations
     BrEq { offset: isize, src0: Load, src1: Load },
@@ -105,22 +105,10 @@ pub enum Bytecode {
     Jump(isize), // IP += .0
 
     // Function call
-    // CallSignature { // Implement later when signature based optimization is implemented
-    //     signature: Rc<FnSignature>,
-    //     arity: u32,
-    // },
     Call { src: Load, arity: u32 },
-    // CallIntrinsic { // Implement later when built-in method based optimization is implemented
-    //     ident: InternedStr,
-    //     arity: u32,
-    // },
-    // TailCall { // Implement later when tail-call optimization is implemented
-    //     src: LocalId,
-    //     arity: u32,
-    // },
 
     // Return
-    Return, // IP = POP()
+    Return,
 }
 impl Bytecode {
     // None -> return
