@@ -13,5 +13,7 @@ pub struct FunctionState {
     children: Vec<FunctionState>,             // Inner functions
 }
 impl FunctionState {
-    pub fn from_decl(decl: &FunctionDecl, parents: &[&FunctionState]) -> FunctionState {}
+    pub fn from_decl(decl: &FunctionDecl, parents: &[&FunctionState]) -> FunctionState {
+        todo!()
+    }
 }

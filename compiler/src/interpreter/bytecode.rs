@@ -1,7 +1,7 @@
 use crate::error::ErrorKind;
 use crate::interpreter::string::{InternedStr, ValueStr};
-use crate::interpreter::value::{Function, Object, Value};
-use crate::interpreter::{Interpreter, LocalId};
+use crate::interpreter::value::{Object, Value};
+use crate::interpreter::{FnSignature, Interpreter, LocalId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -13,25 +13,25 @@ pub enum Load {
     Nil,
     Bool(bool),
     Number(f64),
-    String(ValueStr),
-    Function(Rc<Function>),
+    String(InternedStr),
+    Function(Rc<FnSignature>),
     Array(usize),
     Object(usize),
 }
 impl Load {
-    fn load(&self, interpreter: &Interpreter) -> Value {
-        match self {
+    fn load(&self, interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+        Ok(match self {
             Self::Local(id) => interpreter.get_local(*id),
             Self::Upvalue(id) => interpreter.get_upvalue(*id),
             Self::Global(id) => interpreter.get_global(ValueStr::Interned(*id)),
             Self::Nil => Value::Nil,
             Self::Bool(b) => Value::Bool(*b),
-            Self::Number(f) => Value::Number(*f),
-            Self::String(s) => Value::String(s.clone()),
-            Self::Function(f) => Value::Function(f.clone()),
+            Self::Number(n) => Value::Number(*n),
+            Self::String(s) => Value::String(ValueStr::Interned(*s)),
+            Self::Function(s) => Value::Function(Rc::new(interpreter.create_function(s.clone())?)),
             Self::Array(c) => Value::Array(Rc::new(RefCell::new(Vec::with_capacity(*c)))),
             Self::Object(c) => Value::Object(Rc::new(RefCell::new(Object::with_capacity(*c)))),
-        }
+        })
     }
 }
 #[derive(Debug, Clone)]
@@ -97,8 +97,8 @@ pub enum Bytecode {
     // Property
     LoadProperty { dst: Store, src: Load, prop: InternedStr }, // [.0] = [.1].(.2) --- Equivalent to a.b
     LoadMethod { dst: Store, src: Load, prop: InternedStr }, // [.0] = [.1]:(.2) --- Equivalent to a:b, returns closure that internally calls `a.b(a, ...)`
-    StoreProperty { dst: Store, src: Load, prop: InternedStr }, // [.0].1 = [.2] --- Equivalent to a.b = c
-    LoadPropertyIndirect { dst: Load, src: Load, prop: Load }, // [.0] = [.1][[.2]] --- Equivalent to a[b]
+    StoreProperty { dst: Load, src: Load, prop: InternedStr }, // [.0].1 = [.2] --- Equivalent to a.b = c
+    LoadPropertyIndirect { dst: Store, src: Load, prop: Load }, // [.0] = [.1][[.2]] --- Equivalent to a[b]
     StorePropertyIndirect { dst: Load, src: Load, prop: Load }, // [.0][[.1]] = [.2] --- Equivalent to a[b] = c
 
     // Jumping
@@ -120,99 +120,99 @@ impl Bytecode {
     ) -> Result<Option<usize>, ErrorKind> {
         match self {
             Bytecode::Add { src0, src1, dst } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, v0.try_add(&v1)?)?;
             }
             Bytecode::Sub { src0, src1, dst } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, v0.try_sub(&v1)?)?;
             }
             Bytecode::Mul { src0, src1, dst } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, v0.try_mul(&v1)?)?;
             }
             Bytecode::Div { src0, src1, dst } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, v0.try_div(&v1)?)?;
             }
             Bytecode::Rem { src0, src1, dst } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, v0.try_rem(&v1)?)?;
             }
-            Bytecode::Negate { dst, src } => {
-                let value = src.load(interpreter);
-                dst.store(interpreter, value.try_neg()?)?;
-            }
-            Bytecode::Invert { dst, src } => {
-                let value = src.load(interpreter);
-                dst.store(interpreter, value.try_inv()?)?;
-            }
-            Bytecode::SetTrue { dst, src } => {
-                let value = src.load(interpreter);
-                dst.store(interpreter, Value::Bool(value.as_bool()))?;
-            }
-            Bytecode::SetFalse { dst, src } => {
-                let value = src.load(interpreter);
-                dst.store(interpreter, Value::Bool(!value.as_bool()))?;
-            }
             Bytecode::SetEq { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, Value::Bool(v0 == v1))?;
             }
             Bytecode::SetNe { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(interpreter, Value::Bool(v0 != v1))?;
             }
             Bytecode::SetLt { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(
                     interpreter,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_lt())),
                 )?;
             }
             Bytecode::SetGt { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(
                     interpreter,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_gt())),
                 )?;
             }
             Bytecode::SetLe { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(
                     interpreter,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_le())),
                 )?;
             }
             Bytecode::SetGe { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter);
-                let v1 = src1.load(interpreter);
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
                 dst.store(
                     interpreter,
                     Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_ge())),
                 )?;
+            }
+            Bytecode::Negate { dst, src } => {
+                let value = src.load(interpreter)?;
+                dst.store(interpreter, value.try_neg()?)?;
+            }
+            Bytecode::Invert { dst, src } => {
+                let value = src.load(interpreter)?;
+                dst.store(interpreter, value.try_inv()?)?;
+            }
+            Bytecode::SetTrue { dst, src } => {
+                let value = src.load(interpreter)?;
+                dst.store(interpreter, Value::Bool(value.as_bool()))?;
+            }
+            Bytecode::SetFalse { dst, src } => {
+                let value = src.load(interpreter)?;
+                dst.store(interpreter, Value::Bool(!value.as_bool()))?;
             }
             Bytecode::GlobalReadOnly(id) => {
                 interpreter.make_global_read_only(ValueStr::Interned(*id))
             }
             Bytecode::LoadProperty { dst, src, prop } => {
                 let property = src
-                    .load(interpreter)
+                    .load(interpreter)?
                     .get_property(&Value::String(ValueStr::Interned(*prop)))?;
                 dst.store(interpreter, property)?;
             }
             Bytecode::LoadMethod { dst, src, prop } => {
-                let itself = src.load(interpreter);
+                let itself = src.load(interpreter)?;
                 let function = itself
                     .get_property(&Value::String(ValueStr::Interned(*prop)))?
                     .as_callable()?;
@@ -220,51 +220,85 @@ impl Bytecode {
                 dst.store(interpreter, Value::Function(method))?;
             }
             Bytecode::LoadPropertyIndirect { dst, src, prop } => {
-                let obj = src.load(interpreter);
-                let key = prop.load(interpreter);
+                let obj = src.load(interpreter)?;
+                let key = prop.load(interpreter)?;
                 let property = obj.get_property(&key)?;
                 dst.store(interpreter, property)?;
             }
             Bytecode::StoreProperty { dst, src, prop } => {
-                let value = src.load(interpreter);
-                let obj = dst.load(interpreter);
+                let value = src.load(interpreter)?;
+                let obj = dst.load(interpreter)?;
                 obj.set_property(Value::String(ValueStr::Interned(*prop)), value)?;
             }
             Bytecode::StorePropertyIndirect { dst, src, prop } => {
-                let value = src.load(interpreter);
-                let obj = dst.load(interpreter);
-                let key = prop.load(interpreter);
+                let value = src.load(interpreter)?;
+                let obj = dst.load(interpreter)?;
+                let key = prop.load(interpreter)?;
                 obj.set_property(key, value)?;
             }
-            Bytecode::LoadUpvalue { src, dst } => {
-                let upvalue = interpreter.get_upvalue(*src);
-                interpreter.set_local(*dst, upvalue)?;
-            }
-            Bytecode::StoreUpvalue { src, dst } => {
-                let value = interpreter.get_local(*src);
-                interpreter.set_upvalue(*dst, value)?;
-            }
             Bytecode::BrTrue { src, offset } => {
-                let value = interpreter.get_local(*src);
+                let value = src.load(interpreter)?;
                 if value.as_bool() {
                     return Ok(Some(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrFalse { src, offset } => {
-                let value = interpreter.get_local(*src);
+                let value = src.load(interpreter)?;
                 if !value.as_bool() {
+                    return Ok(Some(((index as isize) + *offset) as usize));
+                }
+            }
+            Bytecode::BrEq { offset, src0, src1 } => {
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
+                if v0 == v1 {
+                    return Ok(Some(((index as isize) + *offset) as usize));
+                }
+            }
+            Bytecode::BrNe { offset, src0, src1 } => {
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
+                if v0 != v1 {
+                    return Ok(Some(((index as isize) + *offset) as usize));
+                }
+            }
+            Bytecode::BrGe { offset, src0, src1 } => {
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
+                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_ge()) {
+                    return Ok(Some(((index as isize) + *offset) as usize));
+                }
+            }
+            Bytecode::BrLe { offset, src0, src1 } => {
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
+                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_le()) {
+                    return Ok(Some(((index as isize) + *offset) as usize));
+                }
+            }
+            Bytecode::BrGt { offset, src0, src1 } => {
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
+                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_gt()) {
+                    return Ok(Some(((index as isize) + *offset) as usize));
+                }
+            }
+            Bytecode::BrLt { offset, src0, src1 } => {
+                let v0 = src0.load(interpreter)?;
+                let v1 = src1.load(interpreter)?;
+                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_lt()) {
                     return Ok(Some(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::Jump(offset) => return Ok(Some(((index as isize) + *offset) as usize)),
             Bytecode::Clone { dst, src } => {
-                let value = interpreter.get_local(*src);
-                interpreter.set_local(*dst, value)?;
+                let value = src.load(interpreter)?;
+                dst.store(interpreter, value)?;
             }
             Bytecode::Truncate(new_len) => interpreter.truncate(*new_len)?,
             Bytecode::Return => return Ok(None),
             Bytecode::Call { src, arity } => {
-                let function = interpreter.get_local(*src).as_callable()?;
+                let function = src.load(interpreter)?.as_callable()?;
                 interpreter.call_function(function, *arity as usize)?;
             }
         }

@@ -273,7 +273,7 @@ mod tests {
 
     use crate::{
         interpreter::{
-            bytecode::Bytecode,
+            bytecode::{Bytecode, Load, Store},
             string::{IndexableStr, InternedStr, ValueStr},
             value::Value,
             FnBody, FnSignature, Interpreter,
@@ -283,21 +283,15 @@ mod tests {
 
     #[test]
     fn basic_function() {
+        #[rustfmt::skip]
+        let bytecode = [
+            Bytecode::Add { dst: Store::Local(0), src0: Load::Local(1), src1: Load::Local(2) },
+            Bytecode::Return,
+        ];
         let signature = Rc::new(FnSignature {
             arity: 2,
             variadic: false,
-            body: FnBody::Bytecode(
-                [
-                    Bytecode::Add {
-                        dst: 0,
-                        src0: 1,
-                        src1: 2,
-                    },
-                    Bytecode::Return,
-                ]
-                .map(|bc| SpanOf(Span::default(), bc))
-                .to_vec(),
-            ),
+            body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
             capture_locations: vec![],
             parent_capture_indices: vec![],
         });
@@ -315,22 +309,20 @@ mod tests {
     #[test]
     fn fibonacci_iterative() {
         #[rustfmt::skip]
-        let bytecode = vec![
-            Bytecode::LoadFloat(2, 0.0),
-            Bytecode::LoadFloat(3, 1.0),
-            Bytecode::LoadFloat(4, 0.0),
+        let bytecode = [
+            Bytecode::Clone { dst: Store::Local(2), src: Load::Number(0.0) },
+            Bytecode::Clone { dst: Store::Local(3), src: Load::Number(1.0) },
+            Bytecode::Clone { dst: Store::Local(4), src: Load::Number(0.0) },
             // While start
-            Bytecode::SetLt { src0: 4, src1: 1, dst: 5},
-            Bytecode::BrFalse { src: 5, offset: 7 },
-            Bytecode::Add { src0: 2, src1: 3, dst: 5},
-            Bytecode::Clone { dst: 2, src: 3 },
-            Bytecode::Clone { dst: 3, src: 5 },
-            Bytecode::LoadFloat(6, 1.0),
-            Bytecode::Add { src0: 4, src1: 6, dst: 4 },
-            Bytecode::Jump(-7),
+            Bytecode::BrGe { offset: 6, src0: Load::Local(4), src1: Load::Local(1) },
+            Bytecode::Add { dst: Store::Local(5), src0: Load::Local(2), src1: Load::Local(3) },
+            Bytecode::Clone { dst: Store::Local(2), src: Load::Local(3) },
+            Bytecode::Clone { dst: Store::Local(3), src: Load::Local(5) },
+            Bytecode::Add { dst: Store::Local(4), src0: Load::Local(4), src1: Load::Number(1.0) },
+            Bytecode::Jump(-5),
             // While end
             Bytecode::Truncate(5),
-            Bytecode::Clone { src: 2, dst: 0 },
+            Bytecode::Clone { dst: Store::Local(0), src: Load::Local(2) },
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
@@ -338,12 +330,7 @@ mod tests {
             variadic: false,
             capture_locations: vec![],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(
-                bytecode
-                    .into_iter()
-                    .map(|bc| SpanOf(Span::default(), bc))
-                    .collect(),
-            ),
+            body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
@@ -368,20 +355,15 @@ mod tests {
         let name = InternedStr::from(IndexableStr::from("fib"));
 
         #[rustfmt::skip]
-        let bytecode = vec![
-            Bytecode::LoadFloat(2, 1.0),
-            Bytecode::SetLe { dst: 2, src0: 1, src1: 2 },
-            Bytecode::BrFalse { src: 2, offset: 3 },
-            Bytecode::Clone { dst: 0, src: 1 },
+        let bytecode = [
+            Bytecode::BrLe { offset: 7, src0: Load::Local(1), src1: Load::Number(1.0) },
+            Bytecode::Sub { dst: Store::Local(3), src0: Load::Local(1), src1: Load::Number(1.0) },
+            Bytecode::Call { src: Load::Global(name), arity: 1 },
+            Bytecode::Sub { dst: Store::Local(4), src0: Load::Local(1), src1: Load::Number(2.0) },
+            Bytecode::Call { src: Load::Global(name), arity: 1 },
+            Bytecode::Add { dst: Store::Local(0), src0: Load::Local(2), src1: Load::Local(3) },
             Bytecode::Return,
-            Bytecode::LoadGlobal { dst: 2, src: name },
-            Bytecode::LoadFloat(4, 1.0),
-            Bytecode::Sub { dst: 4, src0: 1, src1: 4 },
-            Bytecode::Call { src: 2, arity: 1 },
-            Bytecode::LoadFloat(5, 2.0),
-            Bytecode::Sub { dst: 5, src0: 1, src1: 5 },
-            Bytecode::Call { src: 2, arity: 1 },
-            Bytecode::Add { dst: 0, src0: 3, src1: 4 },
+            Bytecode::Clone { dst: Store::Local(0), src: Load::Local(1) },
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
@@ -389,12 +371,7 @@ mod tests {
             capture_locations: vec![],
             parent_capture_indices: vec![],
             variadic: false,
-            body: FnBody::Bytecode(
-                bytecode
-                    .into_iter()
-                    .map(|bc| SpanOf(Span::default(), bc))
-                    .collect(),
-            ),
+            body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
@@ -405,7 +382,7 @@ mod tests {
         let mut a = 0.0;
         let mut b = 1.0;
 
-        for i in 0..=10 {
+        for i in 0..=30 {
             let result = interpreter
                 .call_and_return(function.clone(), [Value::Number(i as f64)])
                 .unwrap();
@@ -425,11 +402,9 @@ mod tests {
         let dec_name = InternedStr::from(IndexableStr::from("dec"));
 
         #[rustfmt::skip]
-        let inc_bytecode = vec![
-            Bytecode::LoadUpvalue { src: 0, dst: 0 },
-            Bytecode::LoadFloat(1, 1.0),
-            Bytecode::Add { dst: 0, src0: 0, src1: 1 },
-            Bytecode::StoreUpvalue { src: 0, dst: 0 },
+        let inc_bytecode = [
+            Bytecode::Add { dst: Store::Upvalue(0), src0: Load::Upvalue(0), src1: Load::Number(1.0) },
+            Bytecode::Clone { dst: Store::Local(0), src: Load::Upvalue(0) },
             Bytecode::Return,
         ];
         let inc_signature = Rc::new(FnSignature {
@@ -437,19 +412,12 @@ mod tests {
             variadic: false,
             capture_locations: vec![1],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(
-                inc_bytecode
-                    .into_iter()
-                    .map(|bc| SpanOf(Span::default(), bc))
-                    .collect(),
-            ),
+            body: FnBody::Bytecode(inc_bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         #[rustfmt::skip]
-        let dec_bytecode = vec![
-            Bytecode::LoadUpvalue { src: 0, dst: 0 },
-            Bytecode::LoadFloat(1, 1.0),
-            Bytecode::Sub { dst: 0, src0: 0, src1: 1 },
-            Bytecode::StoreUpvalue { src: 0, dst: 0 },
+        let dec_bytecode = [
+            Bytecode::Sub { dst: Store::Upvalue(0), src0: Load::Upvalue(0), src1: Load::Number(1.0) },
+            Bytecode::Clone { dst: Store::Local(0), src: Load::Upvalue(0) },
             Bytecode::Return,
         ];
         let dec_signature = Rc::new(FnSignature {
@@ -457,21 +425,14 @@ mod tests {
             variadic: false,
             capture_locations: vec![1],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(
-                dec_bytecode
-                    .into_iter()
-                    .map(|bc| SpanOf(Span::default(), bc))
-                    .collect(),
-            ),
+            body: FnBody::Bytecode(dec_bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         #[rustfmt::skip]
-        let bytecode = vec![
-            Bytecode::LoadFloat(1, 0.0),
-            Bytecode::LoadObject(0, 2),
-            Bytecode::LoadFunction(2, inc_signature.clone()),
-            Bytecode::LoadFunction(3, dec_signature.clone()),
-            Bytecode::StoreProperty { dst: 0, prop: inc_name, src: 2 },
-            Bytecode::StoreProperty { dst: 0, prop: dec_name, src: 3 },
+        let bytecode = [
+            Bytecode::Clone { dst: Store::Local(1), src: Load::Number(0.0) },
+            Bytecode::Clone { dst: Store::Local(0), src: Load::Object(2) },
+            Bytecode::StoreProperty { dst: Load::Local(0), prop: inc_name, src: Load::Function(inc_signature.clone()) },
+            Bytecode::StoreProperty { dst: Load::Local(0), prop: dec_name, src: Load::Function(dec_signature.clone()) },
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
@@ -479,12 +440,7 @@ mod tests {
             variadic: false,
             capture_locations: vec![],
             parent_capture_indices: vec![],
-            body: FnBody::Bytecode(
-                bytecode
-                    .into_iter()
-                    .map(|bc| SpanOf(Span::default(), bc))
-                    .collect(),
-            ),
+            body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
