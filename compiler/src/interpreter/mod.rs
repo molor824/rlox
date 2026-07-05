@@ -310,19 +310,19 @@ mod tests {
     fn fibonacci_iterative() {
         #[rustfmt::skip]
         let bytecode = [
-            Bytecode::Copy { dst: Store::Local(2), src: Load::Number(0.0) },
-            Bytecode::Copy { dst: Store::Local(3), src: Load::Number(1.0) },
-            Bytecode::Copy { dst: Store::Local(4), src: Load::Number(0.0) },
+            Bytecode::Move { dst: Store::Local(2), src: Load::Number(0.0) },
+            Bytecode::Move { dst: Store::Local(3), src: Load::Number(1.0) },
+            Bytecode::Move { dst: Store::Local(4), src: Load::Number(0.0) },
             // While start
             Bytecode::BrGe { offset: 6, src0: Load::Local(4), src1: Load::Local(1) },
             Bytecode::Add { dst: Store::Local(5), src0: Load::Local(2), src1: Load::Local(3) },
-            Bytecode::Copy { dst: Store::Local(2), src: Load::Local(3) },
-            Bytecode::Copy { dst: Store::Local(3), src: Load::Local(5) },
+            Bytecode::Move { dst: Store::Local(2), src: Load::Local(3) },
+            Bytecode::Move { dst: Store::Local(3), src: Load::Local(5) },
             Bytecode::Add { dst: Store::Local(4), src0: Load::Local(4), src1: Load::Number(1.0) },
             Bytecode::Jump(-5),
             // While end
             Bytecode::Truncate(5),
-            Bytecode::Copy { dst: Store::Local(0), src: Load::Local(2) },
+            Bytecode::Move { dst: Store::Local(0), src: Load::Local(2) },
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
@@ -363,7 +363,7 @@ mod tests {
             Bytecode::Call { src: Load::Global(name), arity: 1 },
             Bytecode::Add { dst: Store::Local(0), src0: Load::Local(2), src1: Load::Local(3) },
             Bytecode::Return,
-            Bytecode::Copy { dst: Store::Local(0), src: Load::Local(1) },
+            Bytecode::Move { dst: Store::Local(0), src: Load::Local(1) },
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
@@ -404,7 +404,7 @@ mod tests {
         #[rustfmt::skip]
         let inc_bytecode = [
             Bytecode::Add { dst: Store::Upvalue(0), src0: Load::Upvalue(0), src1: Load::Number(1.0) },
-            Bytecode::Copy { dst: Store::Local(0), src: Load::Upvalue(0) },
+            Bytecode::Move { dst: Store::Local(0), src: Load::Upvalue(0) },
             Bytecode::Return,
         ];
         let inc_signature = Rc::new(FnSignature {
@@ -417,7 +417,7 @@ mod tests {
         #[rustfmt::skip]
         let dec_bytecode = [
             Bytecode::Sub { dst: Store::Upvalue(0), src0: Load::Upvalue(0), src1: Load::Number(1.0) },
-            Bytecode::Copy { dst: Store::Local(0), src: Load::Upvalue(0) },
+            Bytecode::Move { dst: Store::Local(0), src: Load::Upvalue(0) },
             Bytecode::Return,
         ];
         let dec_signature = Rc::new(FnSignature {
@@ -429,8 +429,8 @@ mod tests {
         });
         #[rustfmt::skip]
         let bytecode = [
-            Bytecode::Copy { dst: Store::Local(1), src: Load::Number(0.0) },
-            Bytecode::Copy { dst: Store::Local(0), src: Load::Object(2) },
+            Bytecode::Move { dst: Store::Local(1), src: Load::Number(0.0) },
+            Bytecode::Move { dst: Store::Local(0), src: Load::Object(2) },
             Bytecode::StoreProperty { dst: Load::Local(0), prop: inc_name, src: Load::Function(inc_signature.clone()) },
             Bytecode::StoreProperty { dst: Load::Local(0), prop: dec_name, src: Load::Function(dec_signature.clone()) },
             Bytecode::Return,

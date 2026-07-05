@@ -23,8 +23,8 @@ impl IndexableStr {
         }
     }
 }
-impl<S: AsRef<str>> From<S> for IndexableStr {
-    fn from(value: S) -> Self {
+impl From<&str> for IndexableStr {
+    fn from(value: &str) -> Self {
         StringKind::from(value).into()
     }
 }
@@ -156,16 +156,15 @@ impl Add for &StringKind {
         }
     }
 }
-impl<S: AsRef<str>> From<S> for StringKind {
-    fn from(value: S) -> Self {
-        let str = value.as_ref();
-        let max_char = str.chars().max().unwrap_or('\0');
+impl From<&str> for StringKind {
+    fn from(value: &str) -> Self {
+        let max_char = value.chars().max().unwrap_or('\0');
         if max_char.len_utf8() == 1 {
-            Self::from_str_as_utf8(str)
+            Self::from_str_as_utf8(value)
         } else if max_char.len_utf16() == 1 {
-            Self::from_str_as_utf16(str)
+            Self::from_str_as_utf16(value)
         } else {
-            Self::from_str_as_utf32(str)
+            Self::from_str_as_utf32(value)
         }
     }
 }
@@ -280,5 +279,10 @@ impl Hash for InternedStr {
 impl From<IndexableStr> for InternedStr {
     fn from(value: IndexableStr) -> Self {
         THREAD_INTERNER.with(|interner| interner.borrow_mut().add_str(&value))
+    }
+}
+impl From<&str> for InternedStr {
+    fn from(value: &str) -> Self {
+        InternedStr::from(IndexableStr::from(value))
     }
 }

@@ -18,6 +18,22 @@ pub enum Load {
     Array(usize),
     Object(usize),
 }
+impl PartialEq for Load {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Local(id) => matches!(other, Self::Local(id2) if id == id2),
+            Self::Upvalue(id) => matches!(other, Self::Upvalue(id2) if id == id2),
+            Self::Global(id) => matches!(other, Self::Global(id2) if id == id2),
+            Self::Nil => matches!(other, Self::Nil),
+            Self::Bool(b) => matches!(other, Self::Bool(b2) if b == b2),
+            Self::Number(n) => matches!(other, Self::Number(n2) if n == n2),
+            Self::String(s) => matches!(other, Self::String(s2) if s == s2),
+            Self::Function(f) => matches!(other, Self::Function(f2) if Rc::ptr_eq(f, f2)),
+            Self::Array(_) => matches!(other, Self::Array(_)),
+            Self::Object(_) => matches!(other, Self::Object(_)),
+        }
+    }
+}
 impl Load {
     fn load(&self, interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
         Ok(match self {
@@ -34,13 +50,20 @@ impl Load {
         })
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Store {
     Local(LocalId),
     Global(InternedStr),
     Upvalue(LocalId),
 }
 impl Store {
+    pub fn to_load(&self) -> Load {
+        match self {
+            Self::Local(lid) => Load::Local(*lid),
+            Self::Global(id) => Load::Global(*id),
+            Self::Upvalue(id) => Load::Upvalue(*id),
+        }
+    }
     fn store(&self, interpreter: &mut Interpreter, new_value: Value) -> Result<(), ErrorKind> {
         match self {
             Self::Local(id) => interpreter.set_local(*id, new_value),
@@ -50,7 +73,7 @@ impl Store {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[rustfmt::skip]
 /// Bytecode for the language. It assumes a linear memory made up of cell that can accept any value.
 /// Constants, and globals have their own unique IDs so from the codegen perspective, global and constant identifiers needs to be interned before being used.
@@ -91,7 +114,7 @@ pub enum Bytecode {
     GlobalReadOnly(InternedStr), // make GLOBAL[.0] read-only
 
     // Memory
-    Copy { dst: Store, src: Load }, // [.0] = [.1]
+    Move { dst: Store, src: Load }, // [.0] = [.1]
     Truncate(usize), // truncates till .0
 
     // Property
@@ -100,6 +123,13 @@ pub enum Bytecode {
     StoreProperty { dst: Load, src: Load, prop: InternedStr }, // [.0].1 = [.2] --- Equivalent to a.b = c
     LoadPropertyIndirect { dst: Store, src: Load, prop: Load }, // [.0] = [.1][[.2]] --- Equivalent to a[b]
     StorePropertyIndirect { dst: Load, src: Load, prop: Load }, // [.0][[.1]] = [.2] --- Equivalent to a[b] = c
+
+    // Array initialization
+    AppendElement { dst: Load, src: Load },
+    AppendElements { dst: Load, src: Load }, // elems should be array or any iterator
+
+    // Object initialization
+    StoreProperties { dst: Load, src: Load }, // src should be object or any iterator
 
     // Jumping
     Jump(isize), // IP += .0
@@ -291,7 +321,7 @@ impl Bytecode {
                 }
             }
             Bytecode::Jump(offset) => return Ok(Some(((index as isize) + *offset) as usize)),
-            Bytecode::Copy { dst, src } => {
+            Bytecode::Move { dst, src } => {
                 let value = src.load(interpreter)?;
                 dst.store(interpreter, value)?;
             }
@@ -301,6 +331,7 @@ impl Bytecode {
                 let function = src.load(interpreter)?.as_callable()?;
                 interpreter.call_function(function, *arity as usize)?;
             }
+            bc => todo!("{bc:?} is not implemented yet!"),
         }
         Ok(Some(index + 1))
     }
