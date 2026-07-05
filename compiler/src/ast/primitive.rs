@@ -1,4 +1,4 @@
-use num_bigint::BigInt;
+use num_bigint::BigUint;
 
 use crate::{
     ast::{expression::*, *},
@@ -96,11 +96,11 @@ impl<R: BufRead> Parser<R> {
         Ok(skipped)
     }
     /// Parses partial integer. More specifically, it parses integer without the prefix part, sending the radix as a parameter
-    fn next_partial_integer(&mut self, radix: u32) -> Result<Option<SpanOf<BigInt>>> {
+    fn next_partial_integer(&mut self, radix: u32) -> Result<Option<SpanOf<BigUint>>> {
         let Some(first_digit) = self.next_digit(radix)? else {
             return Ok(None);
         };
-        let mut number = first_digit.map(BigInt::from);
+        let mut number = first_digit.map(BigUint::from);
         loop {
             let prev = self.clone();
             self.next_if(|ch| ch.1 == '_')?;

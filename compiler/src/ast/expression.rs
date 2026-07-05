@@ -1,6 +1,6 @@
 use std::cell::Ref;
 
-use num_bigint::BigInt;
+use num_bigint::BigUint;
 
 use crate::{
     ast::{
@@ -205,14 +205,36 @@ impl fmt::Debug for SourceSpan {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Integer {
     pub radix: u32,
-    pub integer: BigInt,
+    pub integer: BigUint,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Number {
     pub radix: u32,
-    pub integer: BigInt,
+    pub integer: BigUint,
     pub exponent: Option<i64>,
+}
+impl Number {
+    pub fn to_f64(&self) -> f64 {
+        let mut integer = self.integer.clone();
+        let mut value = 0.0;
+        while integer != BigUint::ZERO {
+            value *= self.radix as f64;
+            value += (&integer % self.radix).to_u32_digits()[0] as f64;
+            integer /= self.radix;
+        }
+        let exponent = self.exponent.unwrap_or(0);
+        if exponent < 0 {
+            for _ in exponent..0 {
+                value /= self.radix as f64;
+            }
+        } else {
+            for _ in 0..exponent {
+                value /= self.radix as f64;
+            }
+        }
+        value
+    }
 }
 impl fmt::Display for Number {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -238,13 +260,13 @@ impl fmt::Display for Number {
     }
 }
 impl Number {
-    pub fn new(radix: u32, mut integer: BigInt, mut exponent: Option<i64>) -> Self {
+    pub fn new(radix: u32, mut integer: BigUint, mut exponent: Option<i64>) -> Self {
         if let Some(mut exp) = exponent {
             // Perform zero trimming exponent optimization
-            if integer == BigInt::ZERO {
+            if integer == BigUint::ZERO {
                 exp = 0
             } else {
-                while &integer % radix == BigInt::ZERO {
+                while &integer % radix == BigUint::ZERO {
                     integer /= radix;
                     exp += 1;
                 }

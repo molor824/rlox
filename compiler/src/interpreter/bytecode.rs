@@ -91,7 +91,7 @@ pub enum Bytecode {
     GlobalReadOnly(InternedStr), // make GLOBAL[.0] read-only
 
     // Memory
-    Clone { dst: Store, src: Load }, // [.0] = [.1]
+    Copy { dst: Store, src: Load }, // [.0] = [.1]
     Truncate(usize), // truncates till .0
 
     // Property
@@ -291,7 +291,7 @@ impl Bytecode {
                 }
             }
             Bytecode::Jump(offset) => return Ok(Some(((index as isize) + *offset) as usize)),
-            Bytecode::Clone { dst, src } => {
+            Bytecode::Copy { dst, src } => {
                 let value = src.load(interpreter)?;
                 dst.store(interpreter, value)?;
             }

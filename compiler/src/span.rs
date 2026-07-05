@@ -38,6 +38,9 @@ impl<T> SpanOf<T> {
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> SpanOf<U> {
         SpanOf(self.0, f(self.1))
     }
+    pub fn as_ref(&self) -> SpanOf<&T> {
+        SpanOf(self.0, &self.1)
+    }
     pub fn concat<U, Q>(self, other: SpanOf<U>, f: impl FnOnce(T, U) -> Q) -> SpanOf<Q> {
         SpanOf(self.0.concat(other.0), f(self.1, other.1))
     }
