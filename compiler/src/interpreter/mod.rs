@@ -21,11 +21,11 @@ struct FunctionFrame {
 
 #[derive(Debug)]
 pub struct FnSignature {
-    arity: usize,                       // NOTE: arity EXCLUDES variadic parameter!
-    variadic: bool,                     // if true, function has variadic parameter.
-    capture_locations: Vec<LocalId>,    // location relative to parent's local scope
-    parent_capture_indices: Vec<usize>, // indices of parent's captured upvalues, to be recursively captured
-    body: FnBody,
+    pub arity: usize,                       // NOTE: arity EXCLUDES variadic parameter!
+    pub variadic: bool,                     // if true, function has variadic parameter.
+    pub capture_locations: Vec<LocalId>,    // location relative to parent's local scope
+    pub parent_capture_indices: Vec<usize>, // indices of parent's captured upvalues, to be recursively captured
+    pub body: FnBody,
 }
 impl FnSignature {
     fn required_arity(&self) -> usize {

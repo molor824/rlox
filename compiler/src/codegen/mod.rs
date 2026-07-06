@@ -14,6 +14,19 @@ pub struct Codegen {
     local_len: LocalId,
 }
 impl Codegen {
+    fn load_expr(&self, expr: &Expression) -> Option<Load> {
+        match expr {
+            Expression::Nil(_) => Some(Load::Nil),
+            Expression::Number(n) => Some(Load::Number(n.1.to_f64())),
+            Expression::String(s) => Some(Load::String(s.1.as_str().into())),
+            Expression::Boolean(b) => Some(Load::Bool(b.1)),
+            Expression::Array(elems) if elems.1.is_empty() => Some(Load::Array(0)),
+            Expression::Object(objs) if objs.1.is_empty() => Some(Load::Object(0)),
+            Expression::FunctionDecl(_) => todo!("Resolve functions!"),
+            Expression::Ident(_) => todo!("Resolve variables!"),
+            _ => None,
+        }
+    }
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
         self.bytecodes.push(bytecode);
     }
@@ -34,24 +47,36 @@ impl Codegen {
         for elem in arr.1.iter() {
             match elem {
                 Element::Regular(expr) => {
-                    let next_local = self.inc_local();
-                    self.gen_expr(expr, &Store::Local(next_local));
+                    let load = match self.load_expr(expr) {
+                        Some(l) => l,
+                        None => {
+                            let next_local = self.inc_local();
+                            self.gen_expr(expr, &Store::Local(next_local));
+                            Load::Local(next_local)
+                        }
+                    };
                     self.push_bytecode(SpanOf(
                         expr.span(),
                         Bytecode::AppendElement {
                             dst: load_method.clone(),
-                            src: Load::Local(next_local),
+                            src: load,
                         },
                     ));
                 }
                 Element::Unpack(unpack) => {
-                    let next_local = self.inc_local();
-                    self.gen_expr(&unpack.1, &Store::Local(next_local));
+                    let load = match self.load_expr(&unpack.1) {
+                        Some(l) => l,
+                        None => {
+                            let local = self.inc_local();
+                            self.gen_expr(&unpack.1, &Store::Local(local));
+                            Load::Local(local)
+                        }
+                    };
                     self.push_bytecode(SpanOf(
                         unpack.0,
                         Bytecode::AppendElements {
                             dst: load_method.clone(),
-                            src: Load::Local(next_local),
+                            src: load,
                         },
                     ));
                 }
@@ -70,40 +95,64 @@ impl Codegen {
         for pair in obj.1.iter() {
             match pair {
                 Pair::Ident(key, value) => {
-                    let next_local = self.inc_local();
-                    self.gen_expr(value, &Store::Local(next_local));
+                    let load = match self.load_expr(value) {
+                        Some(l) => l,
+                        None => {
+                            let next_local = self.inc_local();
+                            self.gen_expr(value, &Store::Local(next_local));
+                            Load::Local(next_local)
+                        }
+                    };
                     let key_str = key.get_str();
                     self.push_bytecode(SpanOf(
                         key.0.concat(value.span()),
                         Bytecode::StoreProperty {
                             dst: load_method.clone(),
-                            src: Load::Local(next_local),
+                            src: load,
                             prop: InternedStr::from(&key_str as &str),
                         },
                     ));
                 }
                 Pair::Index(key, value) => {
-                    let next_key_local = self.inc_local();
-                    self.gen_expr(&key.1, &Store::Local(next_key_local));
-                    let next_value_local = self.inc_local();
-                    self.gen_expr(value, &Store::Local(next_value_local));
+                    let load_key = match self.load_expr(&key.1) {
+                        Some(l) => l,
+                        None => {
+                            let local = self.inc_local();
+                            self.gen_expr(&key.1, &Store::Local(local));
+                            Load::Local(local)
+                        }
+                    };
+                    let load_value = match self.load_expr(value) {
+                        Some(l) => l,
+                        None => {
+                            let local = self.inc_local();
+                            self.gen_expr(value, &Store::Local(local));
+                            Load::Local(local)
+                        }
+                    };
                     self.push_bytecode(SpanOf(
                         key.0.concat(value.span()),
                         Bytecode::StorePropertyIndirect {
                             dst: load_method.clone(),
-                            src: Load::Local(next_value_local),
-                            prop: Load::Local(next_key_local),
+                            src: load_value,
+                            prop: load_key,
                         },
                     ));
                 }
                 Pair::Unpack(unpack) => {
-                    let next_local = self.inc_local();
-                    self.gen_expr(&unpack.1, &Store::Local(next_local));
+                    let load = match self.load_expr(&unpack.1) {
+                        Some(l) => l,
+                        None => {
+                            let local = self.inc_local();
+                            self.gen_expr(&unpack.1, &Store::Local(local));
+                            Load::Local(local)
+                        }
+                    };
                     self.push_bytecode(SpanOf(
                         unpack.0,
                         Bytecode::StoreProperties {
                             dst: load_method.clone(),
-                            src: Load::Local(next_local),
+                            src: load,
                         },
                     ));
                 }
@@ -162,18 +211,13 @@ mod tests {
         #[rustfmt::skip]
         let expected = [
             Bytecode::Move { dst: Store::Local(0), src: Load::Array(4) },
-            Bytecode::Move { dst: Store::Local(1), src: Load::Number(1.0) },
-            Bytecode::AppendElement { dst: Load::Local(0), src: Load::Local(1) },
-            Bytecode::Move { dst: Store::Local(2), src: Load::Number(2.0) },
-            Bytecode::AppendElement { dst: Load::Local(0), src: Load::Local(2) },
-            Bytecode::Move { dst: Store::Local(3), src: Load::Array(2) },
-            Bytecode::Move { dst: Store::Local(4), src: Load::Nil },
-            Bytecode::AppendElement { dst: Load::Local(3), src: Load::Local(4) },
-            Bytecode::Move { dst: Store::Local(5), src: Load::Bool(true) },
-            Bytecode::AppendElement { dst: Load::Local(3), src: Load::Local(5) },
-            Bytecode::AppendElements { dst: Load::Local(0), src: Load::Local(3) },
-            Bytecode::Move { dst: Store::Local(6), src: Load::Bool(false) },
-            Bytecode::AppendElement { dst: Load::Local(0), src: Load::Local(6) },
+            Bytecode::AppendElement { dst: Load::Local(0), src: Load::Number(1.0) },
+            Bytecode::AppendElement { dst: Load::Local(0), src: Load::Number(2.0) },
+            Bytecode::Move { dst: Store::Local(1), src: Load::Array(2) },
+            Bytecode::AppendElement { dst: Load::Local(1), src: Load::Nil },
+            Bytecode::AppendElement { dst: Load::Local(1), src: Load::Bool(true) },
+            Bytecode::AppendElements { dst: Load::Local(0), src: Load::Local(1) },
+            Bytecode::AppendElement { dst: Load::Local(0), src: Load::Bool(false) },
         ];
         let mut codegen = Codegen::default();
         let local = codegen.inc_local();
