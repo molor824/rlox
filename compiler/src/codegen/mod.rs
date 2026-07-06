@@ -11,7 +11,7 @@ use crate::{
 #[derive(Default)]
 pub struct Codegen {
     bytecodes: Vec<SpanOf<Bytecode>>,
-    local_len: LocalId,
+    locals: Vec<Option<InternedStr>>,
 }
 impl Codegen {
     fn load_expr(&self, expr: &Expression) -> Option<Load> {
@@ -23,17 +23,32 @@ impl Codegen {
             Expression::Array(elems) if elems.1.is_empty() => Some(Load::Array(0)),
             Expression::Object(objs) if objs.1.is_empty() => Some(Load::Object(0)),
             Expression::FunctionDecl(_) => todo!("Resolve functions!"),
-            Expression::Ident(_) => todo!("Resolve variables!"),
+            Expression::Ident(name) => {
+                let interned = InternedStr::from(&name.get_str() as &str);
+                Some(match self.get_local(interned) {
+                    Some(local) => Load::Local(local),
+                    None => Load::Global(interned),
+                })
+            }
             _ => None,
         }
     }
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
         self.bytecodes.push(bytecode);
     }
-    fn inc_local(&mut self) -> LocalId {
-        let temp = self.local_len;
-        self.local_len += 1;
+    fn push_local(&mut self, name: Option<InternedStr>) -> LocalId {
+        let temp = self.locals.len() as LocalId;
+        self.locals.push(name);
         temp
+    }
+    fn push_temp_local(&mut self) -> LocalId {
+        self.push_local(None)
+    }
+    fn get_local(&self, name: InternedStr) -> Option<LocalId> {
+        self.locals
+            .iter()
+            .rposition(|l| l.is_some_and(|s| s == name))
+            .map(|idx| idx as LocalId)
     }
     fn gen_array(&mut self, arr: &SpanOf<Vec<Element>>, store_method: &Store) {
         self.push_bytecode(SpanOf(
@@ -50,7 +65,7 @@ impl Codegen {
                     let load = match self.load_expr(expr) {
                         Some(l) => l,
                         None => {
-                            let next_local = self.inc_local();
+                            let next_local = self.push_temp_local();
                             self.gen_expr(expr, &Store::Local(next_local));
                             Load::Local(next_local)
                         }
@@ -67,7 +82,7 @@ impl Codegen {
                     let load = match self.load_expr(&unpack.1) {
                         Some(l) => l,
                         None => {
-                            let local = self.inc_local();
+                            let local = self.push_temp_local();
                             self.gen_expr(&unpack.1, &Store::Local(local));
                             Load::Local(local)
                         }
@@ -98,7 +113,7 @@ impl Codegen {
                     let load = match self.load_expr(value) {
                         Some(l) => l,
                         None => {
-                            let next_local = self.inc_local();
+                            let next_local = self.push_temp_local();
                             self.gen_expr(value, &Store::Local(next_local));
                             Load::Local(next_local)
                         }
@@ -117,7 +132,7 @@ impl Codegen {
                     let load_key = match self.load_expr(&key.1) {
                         Some(l) => l,
                         None => {
-                            let local = self.inc_local();
+                            let local = self.push_temp_local();
                             self.gen_expr(&key.1, &Store::Local(local));
                             Load::Local(local)
                         }
@@ -125,7 +140,7 @@ impl Codegen {
                     let load_value = match self.load_expr(value) {
                         Some(l) => l,
                         None => {
-                            let local = self.inc_local();
+                            let local = self.push_temp_local();
                             self.gen_expr(value, &Store::Local(local));
                             Load::Local(local)
                         }
@@ -143,7 +158,7 @@ impl Codegen {
                     let load = match self.load_expr(&unpack.1) {
                         Some(l) => l,
                         None => {
-                            let local = self.inc_local();
+                            let local = self.push_temp_local();
                             self.gen_expr(&unpack.1, &Store::Local(local));
                             Load::Local(local)
                         }
@@ -220,7 +235,7 @@ mod tests {
             Bytecode::AppendElement { dst: Load::Local(0), src: Load::Bool(false) },
         ];
         let mut codegen = Codegen::default();
-        let local = codegen.inc_local();
+        let local = codegen.push_temp_local();
         codegen.gen_expr(&result, &Store::Local(local));
         for (bc, expected) in codegen.bytecodes.into_iter().zip(expected) {
             println!("{:?}", bc.1);
