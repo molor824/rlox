@@ -92,12 +92,22 @@ impl Store {
 /// Operational instructions only access the local memory, where it's relative to the base function pointer.
 /// The memory automatically grows if the memory index is past the stack pointer.
 pub enum Bytecode {
+    Nop,
+
     // Binary operations
     Add { dst: Store, src0: Load, src1: Load },
     Sub { dst: Store, src0: Load, src1: Load },
     Mul { dst: Store, src0: Load, src1: Load },
     Div { dst: Store, src0: Load, src1: Load },
     Rem { dst: Store, src0: Load, src1: Load },
+    Pow { dst: Store, src0: Load, src1: Load },
+    Shl { dst: Store, src0: Load, src1: Load },
+    Shr { dst: Store, src0: Load, src1: Load },
+    Sha { dst: Store, src0: Load, src1: Load },
+    And { dst: Store, src0: Load, src1: Load },
+    Or { dst: Store, src0: Load, src1: Load },
+    Xor { dst: Store, src0: Load, src1: Load },
+
     SetEq { dst: Store, src0: Load, src1: Load },
     SetNe { dst: Store, src0: Load, src1: Load },
     SetLt { dst: Store, src0: Load, src1: Load },
@@ -161,6 +171,7 @@ impl Bytecode {
         index: usize,
     ) -> Result<Result<usize, Value>, ErrorKind> {
         match self {
+            Bytecode::Nop => {}
             Bytecode::Add { src0, src1, dst } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;

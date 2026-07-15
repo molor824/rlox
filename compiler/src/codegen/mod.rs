@@ -9,6 +9,7 @@ use crate::{
     span::{GetSpan, SpanOf},
 };
 
+mod binary;
 mod unary;
 
 #[derive(Default)]
@@ -64,7 +65,6 @@ impl Codegen {
                             src: load,
                         },
                     ));
-                    self.locals.truncate(len);
                 }
                 Element::Unpack(unpack) => {
                     let load = self.gen_expr(&unpack.1, None)?;
@@ -75,9 +75,9 @@ impl Codegen {
                             src: load,
                         },
                     ));
-                    self.locals.truncate(len);
                 }
             }
+            self.locals.truncate(len);
         }
         Ok(load_method)
     }
@@ -109,7 +109,6 @@ impl Codegen {
                             prop: (&key_str as &str).into(),
                         },
                     ));
-                    self.locals.truncate(len);
                 }
                 Pair::Index(key, value) => {
                     let load_key = self.gen_expr(&key.1, None)?;
@@ -122,7 +121,6 @@ impl Codegen {
                             prop: load_key,
                         },
                     ));
-                    self.locals.truncate(len);
                 }
                 Pair::Unpack(unpack) => {
                     let load = self.gen_expr(&unpack.1, None)?;
@@ -133,9 +131,9 @@ impl Codegen {
                             src: load,
                         },
                     ));
-                    self.locals.truncate(len);
                 }
             }
+            self.locals.truncate(len);
         }
         Ok(load_method)
     }
@@ -221,6 +219,11 @@ impl Codegen {
             Expression::Prefix { operator, operand } => {
                 self.gen_prefix(operand, operator, store_method)
             }
+            Expression::Binary {
+                left_operand,
+                operator,
+                right_operand,
+            } => self.gen_binary(left_operand, right_operand, operator, store_method),
             _ => todo!(),
         }
     }

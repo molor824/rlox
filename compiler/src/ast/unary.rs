@@ -50,9 +50,9 @@ impl<R: BufRead> Parser<R> {
         let mut operators = vec![];
         loop {
             if let Some(ch) = self.next_symbols(["-", "~", "!"], skip_newline)? {
-                operators.push(PrefixOperator(ch));
+                operators.push(ch);
             } else if let Some(not) = self.next_keyword("not", skip_newline)? {
-                operators.push(PrefixOperator(SpanOf(not.0, "!")));
+                operators.push(SpanOf(not.0, "!"));
             } else {
                 break;
             }
@@ -60,7 +60,7 @@ impl<R: BufRead> Parser<R> {
 
         let Some(mut expr) = self.next_postfix_operators(skip_newline)? else {
             if let Some(op) = operators.last() {
-                return Err(self.error(op.span(), ErrorKind::ExpectedExpr));
+                return Err(self.error(op.0, ErrorKind::ExpectedExpr));
             } else {
                 return Ok(None);
             }

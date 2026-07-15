@@ -1,5 +1,5 @@
 use crate::{
-    ast::expression::{Element, Expression, PostfixOperator, PrefixOperator},
+    ast::expression::{Element, Expression, PostfixOperator},
     codegen::Codegen,
     error::Result,
     interpreter::{
@@ -17,9 +17,13 @@ impl Codegen {
         operator: &PostfixOperator,
         store_method: Option<Store>,
     ) -> Result<Load> {
-        let len = self.locals.len();
+        let mut max_len = self.locals.len();
         let load_operand = self.gen_expr(operand, None)?;
-        let store_method = store_method.unwrap_or_else(|| Store::Local(len as LocalId));
+        let store_method = store_method.unwrap_or_else(|| {
+            let id = max_len as LocalId;
+            max_len += 1;
+            Store::Local(id)
+        });
         let span = operand.span().concat(operator.span());
 
         match operator {
@@ -93,21 +97,25 @@ impl Codegen {
             }
         }
 
-        self.locals.resize_with(len + 1, || None);
+        self.locals.resize_with(max_len, || None);
 
         Ok(store_method.to_load())
     }
     pub(crate) fn gen_prefix(
         &mut self,
         operand: &Expression,
-        operator: &PrefixOperator,
+        operator: &SpanOf<&'static str>,
         store_method: Option<Store>,
     ) -> Result<Load> {
-        let len = self.locals.len();
+        let mut max_len = self.locals.len();
         let load_operand = self.gen_expr(operand, None)?;
-        let store_method = store_method.unwrap_or_else(|| Store::Local(len as LocalId));
-        let span = operand.span().concat(operator.span());
-        let bytecode = match operator.0 .1 {
+        let store_method = store_method.unwrap_or_else(|| {
+            let id = max_len as LocalId;
+            max_len += 1;
+            Store::Local(id)
+        });
+        let span = operand.span().concat(operator.0);
+        let bytecode = match operator.1 {
             "-" => Bytecode::Negate {
                 dst: store_method.clone(),
                 src: load_operand,
@@ -124,7 +132,7 @@ impl Codegen {
         };
 
         self.push_bytecode(SpanOf(span, bytecode));
-        self.locals.resize_with(len + 1, || None);
+        self.locals.resize_with(max_len, || None);
 
         Ok(store_method.to_load())
     }

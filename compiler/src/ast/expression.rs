@@ -40,7 +40,7 @@ pub enum Expression {
         operand: Box<Expression>,
     },
     Prefix {
-        operator: PrefixOperator,
+        operator: SpanOf<&'static str>,
         operand: Box<Expression>,
     },
     Binary {
@@ -86,7 +86,7 @@ impl fmt::Display for Expression {
                     .join(", ")
             ),
             Self::Postfix { operand, operator } => write!(f, "({operand}){operator}"),
-            Self::Prefix { operator, operand } => write!(f, "{operator}({operand})"),
+            Self::Prefix { operator, operand } => write!(f, "{}({operand})", operator.1),
             Self::Binary {
                 left_operand,
                 operator,
@@ -138,7 +138,7 @@ impl GetSpan for Expression {
             Self::Array(array) => array.0,
             Self::Object(object) => object.0,
             Self::Postfix { operator, operand } => operator.span().concat(operand.span()),
-            Self::Prefix { operator, operand } => operator.span().concat(operand.span()),
+            Self::Prefix { operator, operand } => operator.0.concat(operand.span()),
             Self::Binary {
                 left_operand,
                 operator,
@@ -285,18 +285,6 @@ impl Number {
     }
 }
 
-#[derive(Debug)]
-pub struct PrefixOperator(pub SpanOf<&'static str>);
-impl fmt::Display for PrefixOperator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0 .1)
-    }
-}
-impl GetSpan for PrefixOperator {
-    fn span(&self) -> Span {
-        self.0 .0
-    }
-}
 #[derive(Debug)]
 pub enum PostfixOperator {
     Property(SourceSpan),
