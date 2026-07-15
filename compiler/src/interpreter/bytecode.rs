@@ -8,6 +8,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone)]
 pub enum Load {
     Local(LocalId),
+    LocalIndirect(LocalId),
     Upvalue(LocalId),
     Global(InternedStr),
     Nil,
@@ -22,6 +23,7 @@ impl PartialEq for Load {
     fn eq(&self, other: &Self) -> bool {
         match self {
             Self::Local(id) => matches!(other, Self::Local(id2) if id == id2),
+            Self::LocalIndirect(id) => matches!(other, Self::LocalIndirect(id2) if id == id2),
             Self::Upvalue(id) => matches!(other, Self::Upvalue(id2) if id == id2),
             Self::Global(id) => matches!(other, Self::Global(id2) if id == id2),
             Self::Nil => matches!(other, Self::Nil),
@@ -38,6 +40,9 @@ impl Load {
     fn load(&self, interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
         Ok(match self {
             Self::Local(id) => interpreter.get_local(*id),
+            Self::LocalIndirect(id) => {
+                interpreter.get_local(interpreter.get_local(*id).as_number()? as LocalId)
+            }
             Self::Upvalue(id) => interpreter.get_upvalue(*id),
             Self::Global(id) => interpreter.get_global(ValueStr::Interned(*id)),
             Self::Nil => Value::Nil,
@@ -53,13 +58,15 @@ impl Load {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Store {
     Local(LocalId),
+    LocalIndirect(LocalId),
     Global(InternedStr),
     Upvalue(LocalId),
 }
 impl Store {
     pub fn to_load(&self) -> Load {
         match self {
-            Self::Local(lid) => Load::Local(*lid),
+            Self::Local(id) => Load::Local(*id),
+            Self::LocalIndirect(id) => Load::LocalIndirect(*id),
             Self::Global(id) => Load::Global(*id),
             Self::Upvalue(id) => Load::Upvalue(*id),
         }
@@ -67,6 +74,10 @@ impl Store {
     fn store(&self, interpreter: &mut Interpreter, new_value: Value) -> Result<(), ErrorKind> {
         match self {
             Self::Local(id) => interpreter.set_local(*id, new_value),
+            Self::LocalIndirect(id) => interpreter.set_local(
+                interpreter.get_local(*id).as_number()? as LocalId,
+                new_value,
+            ),
             Self::Global(id) => interpreter.set_global(ValueStr::Interned(*id), new_value),
             Self::Upvalue(id) => interpreter.set_upvalue(*id, new_value),
         }
@@ -135,10 +146,11 @@ pub enum Bytecode {
     Jump(isize), // IP += .0
 
     // Function call
-    Call { src: Load, arity: u32 },
+    Call { src: Load, base: LocalId, dst: Store },
+    CallArray { src: Load, args: Load, dst: Store },
 
     // Return
-    Return,
+    Return(Load),
 }
 impl Bytecode {
     // None -> return
@@ -147,7 +159,7 @@ impl Bytecode {
         &self,
         interpreter: &mut Interpreter,
         index: usize,
-    ) -> Result<Option<usize>, ErrorKind> {
+    ) -> Result<Result<usize, Value>, ErrorKind> {
         match self {
             Bytecode::Add { src0, src1, dst } => {
                 let v0 = src0.load(interpreter)?;
@@ -269,70 +281,71 @@ impl Bytecode {
             Bytecode::BrTrue { src, offset } => {
                 let value = src.load(interpreter)?;
                 if value.as_bool() {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrFalse { src, offset } => {
                 let value = src.load(interpreter)?;
                 if !value.as_bool() {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrEq { offset, src0, src1 } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;
                 if v0 == v1 {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrNe { offset, src0, src1 } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;
                 if v0 != v1 {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrGe { offset, src0, src1 } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_ge()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrLe { offset, src0, src1 } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_le()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrGt { offset, src0, src1 } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_gt()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
             Bytecode::BrLt { offset, src0, src1 } => {
                 let v0 = src0.load(interpreter)?;
                 let v1 = src1.load(interpreter)?;
                 if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_lt()) {
-                    return Ok(Some(((index as isize) + *offset) as usize));
+                    return Ok(Ok(((index as isize) + *offset) as usize));
                 }
             }
-            Bytecode::Jump(offset) => return Ok(Some(((index as isize) + *offset) as usize)),
+            Bytecode::Jump(offset) => return Ok(Ok(((index as isize) + *offset) as usize)),
             Bytecode::Move { dst, src } => {
                 let value = src.load(interpreter)?;
                 dst.store(interpreter, value)?;
             }
             Bytecode::Truncate(new_len) => interpreter.truncate(*new_len)?,
-            Bytecode::Return => return Ok(None),
-            Bytecode::Call { src, arity } => {
+            Bytecode::Return(src) => return src.load(interpreter).map(Err),
+            Bytecode::Call { src, base, dst } => {
                 let function = src.load(interpreter)?.as_callable()?;
-                interpreter.call_function(function, *arity as usize)?;
+                let value = interpreter.call_function(function, *base)?;
+                dst.store(interpreter, value)?;
             }
             bc => todo!("{bc:?} is not implemented yet!"),
         }
-        Ok(Some(index + 1))
+        Ok(Ok(index + 1))
     }
 }

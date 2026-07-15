@@ -220,7 +220,11 @@ impl Number {
         let mut value = 0.0;
         while integer != BigUint::ZERO {
             value *= self.radix as f64;
-            value += (&integer % self.radix).to_u32_digits()[0] as f64;
+            value += (&integer % self.radix)
+                .to_u32_digits()
+                .get(0)
+                .copied()
+                .unwrap_or(0) as f64;
             integer /= self.radix;
         }
         let exponent = self.exponent.unwrap_or(0);

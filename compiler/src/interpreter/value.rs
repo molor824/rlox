@@ -302,6 +302,12 @@ impl Value {
             _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }
+    pub fn as_number(&self) -> Result<f64, ErrorKind> {
+        match self {
+            Self::Number(num) => Ok(*num),
+            _ => Err(ErrorKind::InvalidType(self.type_str(), "number")),
+        }
+    }
     pub fn as_callable(&self) -> Result<Rc<Function>, ErrorKind> {
         match self {
             Self::Function(fun) => Ok(fun.clone()),
