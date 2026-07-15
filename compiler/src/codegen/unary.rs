@@ -1,5 +1,5 @@
 use crate::{
-    ast::expression::{Element, Expression, PostfixOperator},
+    ast::expression::{Element, Expression, PostfixOperator, PrefixOperator},
     codegen::Codegen,
     error::Result,
     interpreter::{
@@ -15,13 +15,10 @@ impl Codegen {
         &mut self,
         operand: &Expression,
         operator: &PostfixOperator,
-        store_method: Option<&Store>,
+        store_method: Option<Store>,
     ) -> Result<Load> {
+        let store_method = store_method.unwrap_or_else(|| Store::Local(self.push_temp_local()));
         let load_operand = self.gen_expr(operand, None)?;
-        let store_method = match store_method {
-            Some(s) => s.clone(),
-            None => Store::Local(self.push_temp_local()),
-        };
         let span = operand.span().concat(operator.span());
         match operator {
             PostfixOperator::Call(args) => {
@@ -36,7 +33,8 @@ impl Codegen {
                 let callcode = match regular_args {
                     None => {
                         let local = self.push_temp_local();
-                        let load_array = self.gen_array(args, Some(&Store::Local(local)))?;
+                        let load_array = self.gen_array(args, Some(Store::Local(local)))?;
+
                         Bytecode::CallArray {
                             dst: store_method.clone(),
                             src: load_operand,
@@ -44,14 +42,15 @@ impl Codegen {
                         }
                     }
                     Some(args) => {
-                        let base = self.locals.len() as LocalId;
+                        let base = self.locals.len();
                         for arg in args {
                             let local = self.push_temp_local();
-                            self.gen_expr(arg, Some(&Store::Local(local)))?;
+                            self.gen_expr(arg, Some(Store::Local(local)))?;
                         }
+
                         Bytecode::Call {
                             src: load_operand,
-                            base,
+                            base: base as LocalId,
                             dst: store_method.clone(),
                         }
                     }
@@ -60,6 +59,7 @@ impl Codegen {
             }
             PostfixOperator::Index(index) => {
                 let load_index = self.gen_expr(&index.1, None)?;
+
                 self.push_bytecode(SpanOf(
                     span,
                     Bytecode::LoadPropertyIndirect {
@@ -90,6 +90,34 @@ impl Codegen {
                 ));
             }
         }
+
+        Ok(store_method.to_load())
+    }
+    pub(crate) fn gen_prefix(
+        &mut self,
+        operand: &Expression,
+        operator: &PrefixOperator,
+        store_method: Option<Store>,
+    ) -> Result<Load> {
+        let store_method = store_method.unwrap_or_else(|| Store::Local(self.push_temp_local()));
+        let load_operand = self.gen_expr(operand, None)?;
+        let span = operand.span().concat(operator.span());
+        let bytecode = match operator.0 .1 {
+            "-" => Bytecode::Negate {
+                dst: store_method.clone(),
+                src: load_operand,
+            },
+            "~" => Bytecode::Invert {
+                dst: store_method.clone(),
+                src: load_operand,
+            },
+            "!" => Bytecode::SetFalse {
+                dst: store_method.clone(),
+                src: load_operand,
+            },
+            op => unreachable!("Must not reach {op}"),
+        };
+        self.push_bytecode(SpanOf(span, bytecode));
         Ok(store_method.to_load())
     }
 }
@@ -104,22 +132,25 @@ mod tests {
 
     #[test]
     fn postfix_gen_test() {
-        let mut parser = Parser::new("foo[0].test:method(1, 2, 3)(4, 5, *rest)".as_bytes());
+        let mut parser = Parser::new("-~!foo[0].test:method(1, 2, 3)(4, 5, *rest)".as_bytes());
         let result = parser.next_expression(false).unwrap().unwrap();
         #[rustfmt::skip]
         let expected = [
-            Bytecode::LoadPropertyIndirect { dst: Store::Local(0), src: Load::Global("foo".into()), prop: Load::Number(0.0) },
-            Bytecode::LoadProperty { dst: Store::Local(1), src: Load::Local(0), prop: "test".into() },
-            Bytecode::LoadMethod { dst: Store::Local(2), src: Load::Local(1), prop: "method".into() },
-            Bytecode::Move { dst: Store::Local(4), src: Load::Number(1.0) },
-            Bytecode::Move { dst: Store::Local(5), src: Load::Number(2.0) },
-            Bytecode::Move { dst: Store::Local(6), src: Load::Number(3.0) },
-            Bytecode::Call { src: Load::Local(2), base: 4, dst: Store::Local(3) },
-            Bytecode::Move { dst: Store::Local(8), src: Load::Array(3) },
-            Bytecode::AppendElement { dst: Load::Local(8), src: Load::Number(4.0) },
-            Bytecode::AppendElement { dst: Load::Local(8), src: Load::Number(5.0) },
-            Bytecode::AppendElements { dst: Load::Local(8), src: Load::Global("rest".into()) },
-            Bytecode::CallArray { src: Load::Local(3), args: Load::Local(8), dst: Store::Local(7) },
+            Bytecode::LoadPropertyIndirect { dst: Store::Local(7), src: Load::Global("foo".into()), prop: Load::Number(0.0) },
+            Bytecode::LoadProperty { dst: Store::Local(6), src: Load::Local(7), prop: "test".into() },
+            Bytecode::LoadMethod { dst: Store::Local(5), src: Load::Local(6), prop: "method".into() },
+            Bytecode::Move { dst: Store::Local(8), src: Load::Number(1.0) },
+            Bytecode::Move { dst: Store::Local(9), src: Load::Number(2.0) },
+            Bytecode::Move { dst: Store::Local(10), src: Load::Number(3.0) },
+            Bytecode::Call { src: Load::Local(5), base: 8, dst: Store::Local(4) },
+            Bytecode::Move { dst: Store::Local(11), src: Load::Array(6) },
+            Bytecode::AppendElement { dst: Load::Local(11), src: Load::Number(4.0) },
+            Bytecode::AppendElement { dst: Load::Local(11), src: Load::Number(5.0) },
+            Bytecode::AppendElements { dst: Load::Local(11), src: Load::Global("rest".into()) },
+            Bytecode::CallArray { src: Load::Local(4), args: Load::Local(11), dst: Store::Local(3) },
+            Bytecode::SetFalse { dst: Store::Local(2), src: Load::Local(3) },
+            Bytecode::Invert { dst: Store::Local(1), src: Load::Local(2) },
+            Bytecode::Negate { dst: Store::Local(0), src: Load::Local(1) },
         ];
         let mut codegen = Codegen::default();
         codegen.gen_expr(&result, None).unwrap();

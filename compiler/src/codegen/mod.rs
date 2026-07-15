@@ -37,10 +37,10 @@ impl Codegen {
     fn gen_array(
         &mut self,
         arr: &SpanOf<Vec<Element>>,
-        store_method: Option<&Store>,
+        store_method: Option<Store>,
     ) -> Result<Load> {
         let store_method = match store_method {
-            Some(s) => s.clone(),
+            Some(s) => s,
             None if arr.1.is_empty() => return Ok(Load::Array(0)),
             None => Store::Local(self.push_temp_local()),
         };
@@ -78,13 +78,9 @@ impl Codegen {
         }
         Ok(load_method)
     }
-    fn gen_object(
-        &mut self,
-        obj: &SpanOf<Vec<Pair>>,
-        store_method: Option<&Store>,
-    ) -> Result<Load> {
+    fn gen_object(&mut self, obj: &SpanOf<Vec<Pair>>, store_method: Option<Store>) -> Result<Load> {
         let store_method = match store_method {
-            Some(s) => s.clone(),
+            Some(s) => s,
             None if obj.1.is_empty() => return Ok(Load::Object(0)),
             None => Store::Local(self.push_temp_local()),
         };
@@ -136,7 +132,7 @@ impl Codegen {
         }
         Ok(load_method)
     }
-    pub fn gen_expr(&mut self, expr: &Expression, store_method: Option<&Store>) -> Result<Load> {
+    pub fn gen_expr(&mut self, expr: &Expression, store_method: Option<Store>) -> Result<Load> {
         match expr {
             Expression::Nil(span) => match store_method {
                 Some(store_method) => {
@@ -215,6 +211,9 @@ impl Codegen {
             Expression::Postfix { operator, operand } => {
                 self.gen_postfix(operand, operator, store_method)
             }
+            Expression::Prefix { operator, operand } => {
+                self.gen_prefix(operand, operator, store_method)
+            }
             _ => todo!(),
         }
     }
@@ -249,7 +248,7 @@ mod tests {
         ];
         let mut codegen = Codegen::default();
         codegen
-            .gen_expr(&result, Some(&Store::Global(test_ident)))
+            .gen_expr(&result, Some(Store::Global(test_ident)))
             .unwrap();
         for (bc, expected) in codegen.bytecodes.into_iter().zip(expected) {
             println!("{:?}", bc.1);
