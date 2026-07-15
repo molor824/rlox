@@ -45,7 +45,6 @@ impl Codegen {
             None if arr.1.is_empty() => return Ok(Load::Array(0)),
             None => Store::Local(self.push_temp_local()),
         };
-        let len = self.locals.len();
         self.push_bytecode(SpanOf(
             arr.0,
             Bytecode::Move {
@@ -77,7 +76,6 @@ impl Codegen {
                     ));
                 }
             }
-            self.locals.truncate(len);
         }
         Ok(load_method)
     }
@@ -87,7 +85,6 @@ impl Codegen {
             None if obj.1.is_empty() => return Ok(Load::Object(0)),
             None => Store::Local(self.push_temp_local()),
         };
-        let len = self.locals.len();
         self.push_bytecode(SpanOf(
             obj.0,
             Bytecode::Move {
@@ -133,7 +130,6 @@ impl Codegen {
                     ));
                 }
             }
-            self.locals.truncate(len);
         }
         Ok(load_method)
     }
