@@ -44,6 +44,7 @@ impl Codegen {
             None if arr.1.is_empty() => return Ok(Load::Array(0)),
             None => Store::Local(self.push_temp_local()),
         };
+        let len = self.locals.len();
         self.push_bytecode(SpanOf(
             arr.0,
             Bytecode::Move {
@@ -63,6 +64,7 @@ impl Codegen {
                             src: load,
                         },
                     ));
+                    self.locals.truncate(len);
                 }
                 Element::Unpack(unpack) => {
                     let load = self.gen_expr(&unpack.1, None)?;
@@ -73,6 +75,7 @@ impl Codegen {
                             src: load,
                         },
                     ));
+                    self.locals.truncate(len);
                 }
             }
         }
@@ -84,6 +87,7 @@ impl Codegen {
             None if obj.1.is_empty() => return Ok(Load::Object(0)),
             None => Store::Local(self.push_temp_local()),
         };
+        let len = self.locals.len();
         self.push_bytecode(SpanOf(
             obj.0,
             Bytecode::Move {
@@ -105,6 +109,7 @@ impl Codegen {
                             prop: (&key_str as &str).into(),
                         },
                     ));
+                    self.locals.truncate(len);
                 }
                 Pair::Index(key, value) => {
                     let load_key = self.gen_expr(&key.1, None)?;
@@ -117,6 +122,7 @@ impl Codegen {
                             prop: load_key,
                         },
                     ));
+                    self.locals.truncate(len);
                 }
                 Pair::Unpack(unpack) => {
                     let load = self.gen_expr(&unpack.1, None)?;
@@ -127,6 +133,7 @@ impl Codegen {
                             src: load,
                         },
                     ));
+                    self.locals.truncate(len);
                 }
             }
         }
