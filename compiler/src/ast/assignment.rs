@@ -88,11 +88,11 @@ impl<R: BufRead> Parser<R> {
             return Err(self.error(eq, ErrorKind::ExpectedExpr));
         };
 
-        Ok(Some(Expression::VarDecl {
+        Ok(Some(Expression::VarDecl(VarDecl {
             keyword: var_kwd,
             ident,
             assigner: Box::new(assigner),
-        }))
+        })))
     }
     pub fn expr_to_assignee(&self, expression: Expression) -> Result<Assignee> {
         let span = expression.span();

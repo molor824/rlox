@@ -27,6 +27,12 @@ pub struct FunctionDecl {
     pub body: FunctionBody,
 }
 #[derive(Debug)]
+pub struct VarDecl {
+    pub keyword: SourceSpan,
+    pub ident: SourceSpan,
+    pub assigner: Box<Expression>,
+}
+#[derive(Debug)]
 pub enum Expression {
     Ident(SourceSpan),
     String(SpanOf<String>),
@@ -53,11 +59,7 @@ pub enum Expression {
         assigner: Box<Expression>,
     },
     FunctionDecl(FunctionDecl),
-    VarDecl {
-        keyword: SourceSpan,
-        ident: SourceSpan,
-        assigner: Box<Expression>,
-    },
+    VarDecl(VarDecl),
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -119,11 +121,11 @@ impl fmt::Display for Expression {
                 }
                 write!(f, ") {body}")
             }
-            Self::VarDecl {
+            Self::VarDecl(VarDecl {
                 ident,
                 assigner,
                 keyword,
-            } => write!(f, "{keyword} {ident} = ({assigner})"),
+            }) => write!(f, "{keyword} {ident} = ({assigner})"),
         }
     }
 }
@@ -151,9 +153,9 @@ impl GetSpan for Expression {
             Self::FunctionDecl(FunctionDecl {
                 body, fn_keyword, ..
             }) => fn_keyword.concat(body.span()),
-            Self::VarDecl {
+            Self::VarDecl(VarDecl {
                 keyword, assigner, ..
-            } => keyword.0.concat(assigner.span()),
+            }) => keyword.0.concat(assigner.span()),
         }
     }
 }
