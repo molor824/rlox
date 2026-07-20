@@ -61,6 +61,7 @@ pub enum Store {
     LocalIndirect(LocalId),
     Global(InternedStr),
     Upvalue(LocalId),
+    Nil,
 }
 impl Store {
     pub fn to_load(&self) -> Load {
@@ -69,6 +70,7 @@ impl Store {
             Self::LocalIndirect(id) => Load::LocalIndirect(*id),
             Self::Global(id) => Load::Global(*id),
             Self::Upvalue(id) => Load::Upvalue(*id),
+            Self::Nil => Load::Nil,
         }
     }
     fn store(&self, interpreter: &mut Interpreter, new_value: Value) -> Result<(), ErrorKind> {
@@ -80,6 +82,7 @@ impl Store {
             ),
             Self::Global(id) => interpreter.set_global(ValueStr::Interned(*id), new_value),
             Self::Upvalue(id) => interpreter.set_upvalue(*id, new_value),
+            Self::Nil => Ok(()),
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    ast::expression::Expression,
+    ast::expression::{Assignee, Expression},
     codegen::Codegen,
     error::Result,
     interpreter::bytecode::{Bytecode, Load, Store},
@@ -74,6 +74,72 @@ impl Codegen {
 
         Ok(store_method.to_load())
     }
+    pub(crate) fn gen_assign(
+        &mut self,
+        assignee: &Assignee,
+        assigner: &Expression,
+        store_method: Option<Store>,
+    ) -> Result<Load> {
+        // Special optimization:
+        // If assignee is ident and store method is nil, its a single assignment whose store is only singly determined ident
+        if let Assignee::Ident(ident) = assignee {
+            if matches!(store_method, Some(Store::Nil)) {
+                let ident_store = self.store_ident((&ident.get_str() as &str).into());
+                self.gen_expr(assigner, Some(ident_store))?;
+                return Ok(Load::Nil);
+            }
+        }
+
+        let span = assignee.span().concat(assigner.span());
+        let load_assigner = self.gen_expr(assigner, None)?; // Load temporarily for storing onto both assignee store and requested store
+        match assignee {
+            Assignee::Ident(ident) => {
+                let ident_store = self.store_ident((&ident.get_str() as &str).into());
+                self.push_bytecode(SpanOf(
+                    span,
+                    Bytecode::Move {
+                        dst: ident_store,
+                        src: load_assigner.clone(),
+                    },
+                ));
+            }
+            Assignee::Index { arg, operand } => {
+                let load_operand = self.gen_expr(operand, None)?;
+                let load_arg = self.gen_expr(&arg.1, None)?;
+                self.push_bytecode(SpanOf(
+                    span,
+                    Bytecode::StorePropertyIndirect {
+                        dst: load_operand,
+                        src: load_assigner.clone(),
+                        prop: load_arg,
+                    },
+                ));
+            }
+            Assignee::Property { ident, operand } => {
+                let load_operand = self.gen_expr(operand, None)?;
+                self.push_bytecode(SpanOf(
+                    span,
+                    Bytecode::StoreProperty {
+                        dst: load_operand,
+                        src: load_assigner.clone(),
+                        prop: (&ident.get_str() as &str).into(),
+                    },
+                ));
+            }
+        }
+        if let Some(store) = store_method {
+            self.push_bytecode(SpanOf(
+                span,
+                Bytecode::Move {
+                    dst: store.clone(),
+                    src: load_assigner,
+                },
+            ));
+            Ok(store.to_load())
+        } else {
+            Ok(load_assigner)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -83,6 +149,32 @@ mod tests {
         codegen::Codegen,
         interpreter::bytecode::{Bytecode, Load, Store},
     };
+
+    #[test]
+    fn assign_gen_test() {
+        let mut parser = Parser::new("a=b=c.d=e.f[0]=1+2".as_bytes());
+        let mut codegen = Codegen::default();
+        codegen
+            .gen_expr(
+                &parser.next_expression(false).unwrap().unwrap(),
+                Some(Store::Nil),
+            )
+            .unwrap();
+
+        #[rustfmt::skip]
+        let expected = [
+            Bytecode::Add { dst: Store::Local(0), src0: Load::Number(1.0), src1: Load::Number(2.0) },
+            Bytecode::LoadProperty { dst: Store::Local(1), src: Load::Global("e".into()), prop: "f".into() },
+            Bytecode::StorePropertyIndirect { dst: Load::Local(1), src: Load::Local(0), prop: Load::Number(0.0) },
+            Bytecode::StoreProperty { dst: Load::Global("c".into()), src: Load::Local(0), prop: "d".into() },
+            Bytecode::Move { dst: Store::Global("b".into()), src: Load::Local(0) },
+            Bytecode::Move { dst: Store::Global("a".into()), src: Load::Local(0) },
+        ];
+        for (bc, expected) in codegen.bytecodes.into_iter().zip(expected) {
+            println!("{:?}", bc.1);
+            assert_eq!(bc.1, expected);
+        }
+    }
 
     #[test]
     fn binary_gen_test() {

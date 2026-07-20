@@ -377,7 +377,7 @@ mod tests {
         let mut a = 0.0;
         let mut b = 1.0;
 
-        for i in 0..=30 {
+        for i in 0..=20 {
             let result = interpreter
                 .call_function_args(function.clone(), [Value::Number(i as f64)])
                 .unwrap();

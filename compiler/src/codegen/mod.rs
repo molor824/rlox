@@ -21,6 +21,13 @@ impl Codegen {
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
         self.bytecodes.push(bytecode);
     }
+    pub(crate) fn store_ident(&self, name: InternedStr) -> Store {
+        if let Some(id) = self.get_local(name) {
+            Store::Local(id)
+        } else {
+            Store::Global(name)
+        }
+    }
     pub(crate) fn push_local(&mut self, name: Option<InternedStr>) -> LocalId {
         let temp = self.locals.len() as LocalId;
         self.locals.push(name);
@@ -220,6 +227,9 @@ impl Codegen {
                 operator,
                 right_operand,
             } => self.gen_binary(left_operand, right_operand, operator, store_method),
+            Expression::Assign { assignee, assigner } => {
+                self.gen_assign(assignee, assigner, store_method)
+            }
             _ => todo!(),
         }
     }
