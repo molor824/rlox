@@ -28,6 +28,8 @@ pub enum ErrorKind {
     ExpectedRightCurly,
     #[error("Expected `:`")]
     ExpectedColon,
+    #[error("Expected `->`")]
+    ExpectedArrow,
     #[error("Expected `=`")]
     ExpectedEq,
     #[error("Cannot use unpacking operation here")]
@@ -78,6 +80,8 @@ pub enum ErrorKind {
     InvalidPropertyAccess,
     #[error("Attempted to access non-existent upvalue")]
     InvalidUpvalueAccess,
+    #[error("Attempted to access local value in global scope")]
+    LocalAccessInGlobal,
 }
 
 #[derive(thiserror::Error)]

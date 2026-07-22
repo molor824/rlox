@@ -17,7 +17,7 @@ impl Codegen {
         operator: &PostfixOperator,
         store_method: Option<Store>,
     ) -> Result<Load> {
-        let store_method = store_method.unwrap_or_else(|| Store::Local(self.push_temp_local()));
+        let store_method = store_method.unwrap_or_else(|| Store::Local(self.gen_eval_id()));
         let load_operand = self.gen_expr(operand, None)?;
         let span = operand.span().concat(operator.span());
 
@@ -33,7 +33,7 @@ impl Codegen {
                     .collect::<Option<Vec<_>>>();
                 let callcode = match regular_args {
                     None => {
-                        let local = self.push_temp_local();
+                        let local = self.gen_eval_id();
                         let load_array = self.gen_array(args, Some(Store::Local(local)))?;
 
                         Bytecode::CallArray {
@@ -43,9 +43,9 @@ impl Codegen {
                         }
                     }
                     Some(args) => {
-                        let base = self.locals.len();
+                        let base = self.eval_size();
                         for arg in args {
-                            let local = self.push_temp_local();
+                            let local = self.gen_eval_id();
                             self.gen_expr(arg, Some(Store::Local(local)))?;
                         }
 
@@ -100,7 +100,7 @@ impl Codegen {
         operator: &SpanOf<&'static str>,
         store_method: Option<Store>,
     ) -> Result<Load> {
-        let store_method = store_method.unwrap_or_else(|| Store::Local(self.push_temp_local()));
+        let store_method = store_method.unwrap_or_else(|| Store::Local(self.gen_eval_id()));
         let load_operand = self.gen_expr(operand, None)?;
         let span = operand.span().concat(operator.0);
         let bytecode = match operator.1 {

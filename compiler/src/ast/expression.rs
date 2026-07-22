@@ -3,10 +3,7 @@ use std::cell::Ref;
 use num_bigint::BigUint;
 
 use crate::{
-    ast::{
-        statement::{print_indent, Statement},
-        *,
-    },
+    ast::{declaration::FunctionBody, *},
     span::{GetSpan, SpanOf},
 };
 
@@ -14,24 +11,10 @@ impl<R: BufRead> Parser<R> {
     // Is used for recursive expressions
     // NOTE: Update when the top most expression implementation changes
     pub fn next_expression(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_assignment(skip_newline)
+        self.next_binary(skip_newline)
     }
 }
 
-#[derive(Debug)]
-pub struct FunctionDecl {
-    pub fn_keyword: Span,
-    pub ident: Option<SourceSpan>,
-    pub params: SpanOf<Vec<SourceSpan>>,
-    pub variadic: Option<SpanOf<SourceSpan>>,
-    pub body: FunctionBody,
-}
-#[derive(Debug)]
-pub struct VarDecl {
-    pub keyword: SourceSpan,
-    pub ident: SourceSpan,
-    pub assigner: Box<Expression>,
-}
 #[derive(Debug)]
 pub enum Expression {
     Ident(SourceSpan),
@@ -58,8 +41,11 @@ pub enum Expression {
         assignee: Assignee,
         assigner: Box<Expression>,
     },
-    FunctionDecl(FunctionDecl),
-    VarDecl(VarDecl),
+    Closure {
+        params: SpanOf<Vec<SourceSpan>>,      // Covers \params ->
+        variadic: Option<SpanOf<SourceSpan>>, // Covers *a
+        body: Box<FunctionBody>,
+    },
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -95,37 +81,28 @@ impl fmt::Display for Expression {
                 right_operand,
             } => write!(f, "({left_operand}) {} ({right_operand})", operator.1),
             Self::Assign { assignee, assigner } => write!(f, "({assignee}) = ({assigner})"),
-            Self::FunctionDecl(FunctionDecl {
-                ident,
+            Self::Closure {
                 params,
-                variadic,
                 body,
-                ..
-            }) => {
-                write!(f, "fn")?;
-                if let Some(ident) = ident {
-                    write!(f, " {}", ident)?;
-                }
-                write!(f, "(")?;
-                for (i, param) in params.1.iter().enumerate() {
-                    if i != 0 {
+                variadic,
+            } => {
+                write!(f, "\\")?;
+                let mut first = true;
+                for p in params.1.iter() {
+                    if !first {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", param)?;
+                    first = false;
+                    write!(f, "{p}")?;
                 }
-                if let Some(variadic) = variadic {
-                    if !params.1.is_empty() {
+                if let Some(v) = variadic {
+                    if !first {
                         write!(f, ", ")?;
                     }
-                    write!(f, "*{}", variadic.1)?;
+                    write!(f, "*{}", v.1)?;
                 }
-                write!(f, ") {body}")
+                write!(f, " -> {body}")
             }
-            Self::VarDecl(VarDecl {
-                ident,
-                assigner,
-                keyword,
-            }) => write!(f, "{keyword} {ident} = ({assigner})"),
         }
     }
 }
@@ -150,38 +127,7 @@ impl GetSpan for Expression {
                 .concat(right_operand.span())
                 .concat(operator.0),
             Self::Assign { assignee, assigner } => assignee.span().concat(assigner.span()),
-            Self::FunctionDecl(FunctionDecl {
-                body, fn_keyword, ..
-            }) => fn_keyword.concat(body.span()),
-            Self::VarDecl(VarDecl {
-                keyword, assigner, ..
-            }) => keyword.0.concat(assigner.span()),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum FunctionBody {
-    Block(SpanOf<Vec<Statement>>),       // span covers `do ... end`
-    Expression(SpanOf<Box<Expression>>), // span covers `=> [expr]`
-}
-impl fmt::Display for FunctionBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Block(block) => {
-                writeln!(f, "do")?;
-                print_indent(&block.1, f)?;
-                write!(f, "end")
-            }
-            Self::Expression(expr) => write!(f, "=> {}", expr.1),
-        }
-    }
-}
-impl GetSpan for FunctionBody {
-    fn span(&self) -> Span {
-        match self {
-            Self::Block(block) => block.0,
-            Self::Expression(expr) => expr.0,
+            Self::Closure { params, body, .. } => params.0.concat(body.span()),
         }
     }
 }

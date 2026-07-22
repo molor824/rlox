@@ -1,46 +1,127 @@
 use crate::{
-    ast::expression::{Element, Expression, Pair},
+    ast::{
+        declaration::Declaration,
+        expression::{Element, Expression, Pair},
+    },
     error::Result,
     interpreter::{
         bytecode::{Bytecode, Load, Store},
         string::InternedStr,
-        LocalId,
+        LocalId, UpvalueLoc,
     },
     span::{GetSpan, SpanOf},
 };
 
 mod binary;
+mod decl;
 mod unary;
+
+struct FnFrame {
+    locals: Vec<InternedStr>,
+    eval_size: LocalId,
+    upvalues: Vec<(InternedStr, UpvalueLoc)>,
+}
+impl FnFrame {
+    fn get_local(&self, name: InternedStr) -> Option<LocalId> {
+        self.locals
+            .iter()
+            .rposition(|n| *n == name)
+            .map(|id| id as LocalId)
+    }
+    fn get_upvalue(&self, name: InternedStr) -> Option<LocalId> {
+        self.upvalues
+            .iter()
+            .rposition(|n| n.0 == name)
+            .map(|id| id as LocalId)
+    }
+}
 
 #[derive(Default)]
 pub struct Codegen {
     bytecodes: Vec<SpanOf<Bytecode>>,
-    locals: Vec<Option<InternedStr>>,
+    frames: Vec<FnFrame>,
+    global_eval_size: LocalId, // This one is used for global scope
 }
 impl Codegen {
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
         self.bytecodes.push(bytecode);
     }
-    pub(crate) fn store_ident(&self, name: InternedStr) -> Store {
+    fn push_local(&mut self, name: InternedStr) -> Option<LocalId> {
+        let f = self.frames.last_mut()?;
+        f.eval_size = 0;
+        f.locals.push(name);
+        Some(f.locals.len() as LocalId - 1)
+    }
+    pub(crate) fn store_ident(&mut self, name: InternedStr) -> Store {
         if let Some(id) = self.get_local(name) {
             Store::Local(id)
+        } else if let Some(id) = self.get_upvalue(name) {
+            Store::Upvalue(id)
         } else {
             Store::Global(name)
         }
     }
-    pub(crate) fn push_local(&mut self, name: Option<InternedStr>) -> LocalId {
-        let temp = self.locals.len() as LocalId;
-        self.locals.push(name);
-        temp
+    pub(crate) fn load_ident(&mut self, name: InternedStr) -> Load {
+        if let Some(id) = self.get_local(name) {
+            Load::Local(id)
+        } else if let Some(id) = self.get_upvalue(name) {
+            Load::Upvalue(id)
+        } else {
+            Load::Global(name)
+        }
     }
-    fn push_temp_local(&mut self) -> LocalId {
-        self.push_local(None)
+    pub(crate) fn eval_size(&self) -> LocalId {
+        match self.frames.last() {
+            Some(f) => f.eval_size + f.locals.len() as LocalId,
+            None => self.global_eval_size,
+        }
     }
-    fn get_local(&self, name: InternedStr) -> Option<LocalId> {
-        self.locals
-            .iter()
-            .rposition(|l| l.is_some_and(|s| s == name))
-            .map(|idx| idx as LocalId)
+    pub(crate) fn gen_eval_id(&mut self) -> LocalId {
+        if let Some(f) = self.frames.last_mut() {
+            let id = f.eval_size + f.locals.len() as LocalId;
+            f.eval_size += 1;
+            id
+        } else {
+            let id = self.global_eval_size;
+            self.global_eval_size += 1;
+            id
+        }
+    }
+    pub(crate) fn get_local(&self, name: InternedStr) -> Option<LocalId> {
+        self.frames.last()?.get_local(name)
+    }
+    pub(crate) fn get_upvalue(&mut self, name: InternedStr) -> Option<LocalId> {
+        // NOTE: Refer to interpreter::FnSignature for the recursive and super upvalue capture ordering!!!
+        let f = self.frames.last_mut()?;
+        if let Some(idx) = f.get_upvalue(name) {
+            Some(idx as LocalId)
+        } else {
+            for idx in (0..(self.frames.len() - 1)).rev() {
+                if let Some(mut id) = self.frames[idx].get_upvalue(name) {
+                    // found id in parent frame's upvalue, propagate
+                    for i in (idx + 1)..self.frames.len() {
+                        let f = &mut self.frames[i];
+                        f.upvalues.push((name, UpvalueLoc::Shared(id)));
+                        id = f.upvalues.len() as LocalId - 1;
+                    }
+                    return Some(id);
+                }
+                if let Some(mut id) = self.frames[idx].get_local(name) {
+                    // found id, add upvalue to the inner frame
+                    let f = &mut self.frames[idx + 1];
+                    f.upvalues.push((name, UpvalueLoc::Local(id)));
+                    // now propagate inner by each parent frame's indices
+                    id = f.upvalues.len() as LocalId - 1;
+                    for i in (idx + 2)..self.frames.len() {
+                        let f = &mut self.frames[i];
+                        f.upvalues.push((name, UpvalueLoc::Shared(id)));
+                        id = f.upvalues.len() as LocalId - 1;
+                    }
+                    return Some(id);
+                }
+            }
+            None
+        }
     }
     fn gen_array(
         &mut self,
@@ -50,7 +131,7 @@ impl Codegen {
         let store_method = match store_method {
             Some(s) => s,
             None if arr.1.is_empty() => return Ok(Load::Array(0)),
-            None => Store::Local(self.push_temp_local()),
+            None => Store::Local(self.gen_eval_id()),
         };
         self.push_bytecode(SpanOf(
             arr.0,
@@ -90,7 +171,7 @@ impl Codegen {
         let store_method = match store_method {
             Some(s) => s,
             None if obj.1.is_empty() => return Ok(Load::Object(0)),
-            None => Store::Local(self.push_temp_local()),
+            None => Store::Local(self.gen_eval_id()),
         };
         self.push_bytecode(SpanOf(
             obj.0,
@@ -197,11 +278,7 @@ impl Codegen {
             Expression::Array(arr) => self.gen_array(arr, store_method),
             Expression::Object(obj) => self.gen_object(obj, store_method),
             Expression::Ident(ident) => {
-                let interned = InternedStr::from(ident.get_str().as_ref() as &str);
-                let load_method = match self.get_local(interned) {
-                    Some(id) => Load::Local(id),
-                    None => Load::Global(interned),
-                };
+                let load_method = self.load_ident((ident.get_str().as_ref() as &str).into());
                 match store_method {
                     Some(s) => {
                         self.push_bytecode(SpanOf(
@@ -231,6 +308,13 @@ impl Codegen {
                 self.gen_assign(assignee, assigner, store_method)
             }
             _ => todo!(),
+        }
+    }
+    pub fn gen_decl(&mut self, declaration: &Declaration) -> Result<()> {
+        match declaration {
+            Declaration::VarDecl(decl) => self.gen_var_decl(&decl),
+            Declaration::Expression(expr) => self.gen_expr(expr, Some(Store::Nil)).map(|_| ()),
+            Declaration::FuncDecl(_) => todo!(),
         }
     }
 }

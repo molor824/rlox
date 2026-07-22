@@ -20,11 +20,16 @@ struct FunctionFrame {
 }
 
 #[derive(Debug)]
+pub enum UpvalueLoc {
+    Local(LocalId),  // Get upvalue from parent frame's local memory
+    Shared(LocalId), // Get upvalue from parent frame's upvalue storage
+}
+
+#[derive(Debug)]
 pub struct FnSignature {
-    pub arity: usize,                       // NOTE: arity EXCLUDES variadic parameter!
-    pub variadic: bool,                     // if true, function has variadic parameter.
-    pub capture_locations: Vec<LocalId>,    // location relative to parent's local scope
-    pub parent_capture_indices: Vec<usize>, // indices of parent's captured upvalues, to be recursively captured
+    pub arity: usize,   // NOTE: arity EXCLUDES variadic parameter!
+    pub variadic: bool, // if true, function has variadic parameter.
+    pub upvalues: Vec<UpvalueLoc>,
     pub body: FnBody,
 }
 impl FnSignature {
@@ -114,15 +119,26 @@ impl Interpreter {
             None => Err(ErrorKind::UninitCellShare),
         }
     }
-    fn get_upvalue(&self, id: LocalId) -> Value {
-        let fun = self.current_frame.as_ref().unwrap().function.as_ref();
-        fun.upvalues
+    fn get_upvalue(&self, id: LocalId) -> Result<Value, ErrorKind> {
+        let fun = self
+            .current_frame
+            .as_ref()
+            .ok_or(ErrorKind::LocalAccessInGlobal)?
+            .function
+            .as_ref();
+        Ok(fun
+            .upvalues
             .get(id as usize)
             .map(|upvalue| upvalue.borrow().clone())
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
     fn set_upvalue(&self, id: LocalId, new_value: Value) -> Result<(), ErrorKind> {
-        let fun = self.current_frame.as_ref().unwrap().function.as_ref();
+        let fun = self
+            .current_frame
+            .as_ref()
+            .ok_or(ErrorKind::LocalAccessInGlobal)?
+            .function
+            .as_ref();
         if let Some(v) = fun.upvalues.get(id as usize) {
             *v.borrow_mut() = new_value;
             Ok(())
@@ -164,7 +180,10 @@ impl Interpreter {
         let function1 = function.clone();
         let curried_method = move |interpreter: &mut Self| -> Result<Value, ErrorKind> {
             // shift all arguments forward, while inserting itself
-            let current_frame = interpreter.current_frame.as_ref().unwrap();
+            let current_frame = interpreter
+                .current_frame
+                .as_ref()
+                .ok_or(ErrorKind::LocalAccessInGlobal)?;
             let arity = current_frame.function.signature.required_arity();
             let base_pointer = current_frame.base_pointer;
 
@@ -176,22 +195,24 @@ impl Interpreter {
             body: FnBody::Builtin(Box::new(curried_method)),
             arity: function1.signature.arity + 1,
             variadic: function1.signature.variadic,
-            capture_locations: vec![],
-            parent_capture_indices: vec![],
+            upvalues: vec![],
         }))
     }
     fn create_function(&mut self, signature: Rc<FnSignature>) -> Result<Function, ErrorKind> {
-        let mut upvalues = Vec::with_capacity(
-            signature.capture_locations.len() + signature.parent_capture_indices.len(),
-        );
-        for index in signature.parent_capture_indices.iter().copied() {
-            let value = self.current_frame.as_ref().unwrap().function.upvalues[index].clone();
-            upvalues.push(value);
-        }
-        for index in signature.capture_locations.iter().copied() {
-            let value = self.make_local_upvalue(index)?;
-            upvalues.push(value);
-        }
+        let upvalues = signature
+            .upvalues
+            .iter()
+            .map(|loc| match loc {
+                UpvalueLoc::Shared(id) => Ok(self
+                    .current_frame
+                    .as_ref()
+                    .ok_or(ErrorKind::LocalAccessInGlobal)?
+                    .function
+                    .upvalues[*id as usize]
+                    .clone()),
+                UpvalueLoc::Local(id) => self.make_local_upvalue(*id),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Function {
             signature,
             upvalues,
@@ -274,7 +295,7 @@ mod tests {
             bytecode::{Bytecode, Load, Store},
             string::{IndexableStr, InternedStr, ValueStr},
             value::Value,
-            FnBody, FnSignature, Interpreter,
+            FnBody, FnSignature, Interpreter, UpvalueLoc,
         },
         span::{Span, SpanOf},
     };
@@ -290,8 +311,7 @@ mod tests {
             arity: 2,
             variadic: false,
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
-            capture_locations: vec![],
-            parent_capture_indices: vec![],
+            upvalues: vec![],
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
@@ -324,8 +344,7 @@ mod tests {
         let signature = Rc::new(FnSignature {
             arity: 1,
             variadic: false,
-            capture_locations: vec![],
-            parent_capture_indices: vec![],
+            upvalues: vec![],
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
@@ -363,8 +382,7 @@ mod tests {
         ];
         let signature = Rc::new(FnSignature {
             arity: 1,
-            capture_locations: vec![],
-            parent_capture_indices: vec![],
+            upvalues: vec![],
             variadic: false,
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
@@ -404,8 +422,7 @@ mod tests {
         let inc_signature = Rc::new(FnSignature {
             arity: 0,
             variadic: false,
-            capture_locations: vec![1],
-            parent_capture_indices: vec![],
+            upvalues: vec![UpvalueLoc::Local(1)],
             body: FnBody::Bytecode(inc_bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         #[rustfmt::skip]
@@ -416,8 +433,7 @@ mod tests {
         let dec_signature = Rc::new(FnSignature {
             arity: 0,
             variadic: false,
-            capture_locations: vec![1],
-            parent_capture_indices: vec![],
+            upvalues: vec![UpvalueLoc::Local(1)],
             body: FnBody::Bytecode(dec_bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         #[rustfmt::skip]
@@ -431,8 +447,7 @@ mod tests {
         let signature = Rc::new(FnSignature {
             arity: 0,
             variadic: false,
-            capture_locations: vec![],
-            parent_capture_indices: vec![],
+            upvalues: vec![],
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();

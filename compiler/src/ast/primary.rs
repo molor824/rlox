@@ -93,11 +93,29 @@ impl<R: BufRead> Parser<R> {
         };
         Ok(Some(Expression::Object(SpanOf(start.concat(end), pairs))))
     }
+    fn next_closure(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let Some(slash) = self.next_symbol("\\", skip_newline)? else {
+            return Ok(None);
+        };
+        let (params, variadic) = self.next_params(skip_newline)?;
+        let Some(arrow) = self.next_symbol("->", skip_newline)? else {
+            return Err(self.error(slash, ErrorKind::ExpectedArrow));
+        };
+        let Some(body) = self.next_body(skip_newline)? else {
+            return Err(self.error(slash.concat(arrow), ErrorKind::ExpectedFuncBody));
+        };
+        Ok(Some(Expression::Closure {
+            params: SpanOf(slash.concat(arrow), params),
+            variadic,
+            body: body.into(),
+        }))
+    }
     pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let methods = [
             Self::next_group,
             Self::next_array,
             Self::next_object,
+            Self::next_closure,
             Self::next_primitive,
         ];
         for method in methods {

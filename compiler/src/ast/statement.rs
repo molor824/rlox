@@ -1,5 +1,5 @@
 use crate::{
-    ast::{expression::*, *},
+    ast::{declaration::Declaration, expression::*, *},
     span::GetSpan,
 };
 
@@ -12,7 +12,7 @@ pub fn print_indent(statements: &[Statement], f: &mut fmt::Formatter<'_>) -> fmt
 
 #[derive(Debug)]
 pub enum Statement {
-    Expression(Expression),
+    Declaration(Declaration),
     If {
         span: Span,
         condition: Expression,
@@ -37,7 +37,7 @@ pub enum Statement {
 impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Expression(expr) => write!(f, "{expr}"),
+            Self::Declaration(decl) => write!(f, "{decl}"),
             Self::If {
                 condition,
                 met_block,
@@ -81,7 +81,7 @@ impl fmt::Display for Statement {
 impl GetSpan for Statement {
     fn span(&self) -> Span {
         match self {
-            Self::Expression(expr) => expr.span(),
+            Self::Declaration(decl) => decl.span(),
             Self::While { span, .. } => *span,
             Self::If { span, .. } => *span,
             Self::For { span, .. } => *span,
@@ -229,9 +229,9 @@ impl<R: BufRead> Parser<R> {
             _ => unreachable!(),
         }
     }
-    fn next_expr_statement(&mut self) -> Result<Option<Statement>> {
-        self.next_expression(false)
-            .map(|expr| expr.map(Statement::Expression))
+    fn next_decl_statement(&mut self) -> Result<Option<Statement>> {
+        self.next_decl(false)
+            .map(|expr| expr.map(Statement::Declaration))
     }
     fn next_break_continue_statement(&mut self) -> Result<Option<Statement>> {
         let Some(keyword) = self.next_keywords(["break", "continue"], false)? else {
@@ -265,7 +265,7 @@ impl<R: BufRead> Parser<R> {
             Self::next_for_statement,
             Self::next_break_continue_statement,
             Self::next_return_statement,
-            Self::next_expr_statement,
+            Self::next_decl_statement,
         ];
         self.skip_seperator()?;
         for method in order {

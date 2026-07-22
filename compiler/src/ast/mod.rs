@@ -1,7 +1,7 @@
 #![allow(clippy::len_without_is_empty)]
 
-pub mod assignment;
 pub mod binary;
+pub mod declaration;
 pub mod expression;
 pub mod primary;
 pub mod primitive;

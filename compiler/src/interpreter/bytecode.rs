@@ -43,7 +43,7 @@ impl Load {
             Self::LocalIndirect(id) => {
                 interpreter.get_local(interpreter.get_local(*id).as_number()? as LocalId)
             }
-            Self::Upvalue(id) => interpreter.get_upvalue(*id),
+            Self::Upvalue(id) => interpreter.get_upvalue(*id)?,
             Self::Global(id) => interpreter.get_global(ValueStr::Interned(*id)),
             Self::Nil => Value::Nil,
             Self::Bool(b) => Value::Bool(*b),

@@ -1,10 +1,43 @@
-use crate::{ast::expression::Expression, span::SpanOf};
+use crate::{
+    ast::expression::{Assignee, Expression, PostfixOperator},
+    span::{GetSpan, SpanOf},
+};
 
 use super::*;
 
 impl<R: BufRead> Parser<R> {
     pub fn next_binary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
-        self.next_logical_or(skip_newline)
+        self.next_assign(skip_newline)
+    }
+    fn expr_to_assignee(&self, expression: Expression) -> Result<Assignee> {
+        let span = expression.span();
+        match expression {
+            Expression::Ident(ident) => Ok(Assignee::Ident(ident)),
+            Expression::Postfix { operator, operand } => match operator {
+                PostfixOperator::Property(ident) => Ok(Assignee::Property { ident, operand }),
+                PostfixOperator::Index(arg) => Ok(Assignee::Index { arg, operand }),
+                _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
+            },
+            _ => Err(self.error(span, ErrorKind::InvalidAssignee)),
+        }
+    }
+    fn next_assign(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
+        let Some(assignee) = self.next_logical_or(skip_newline)? else {
+            return Ok(None);
+        };
+
+        let Some(equal) = self.next_symbol("=", skip_newline)? else {
+            return Ok(Some(assignee));
+        };
+
+        let Some(assigner) = self.next_expression(skip_newline)? else {
+            return Err(self.error(equal, ErrorKind::ExpectedExpr));
+        };
+
+        Ok(Some(Expression::Assign {
+            assignee: self.expr_to_assignee(assignee)?,
+            assigner: Box::new(assigner),
+        }))
     }
     fn next_binary_operator(
         &mut self,
@@ -159,9 +192,9 @@ mod tests {
     #[test]
     fn parse_binary() {
         let question =
-            "-(3).add(1) + 1 * 6 / 2; 1 + 2 + 3\n+ (\t4 + 5\t) * 6; 1!=0 and 3 <= 3 or 3>2";
+            "a = a.b = a[b][c] = a[b].c = -(3).add(1) + 1 * 6 / 2; 1 + 2 + 3\n+ (\t4 + 5\t) * 6; 1!=0 and 3 <= 3 or 3>2";
         let answers = [
-            "(-(((3).add)(1))) + (((1) * (6)) / (2))",
+            "(a) = (((a).b) = ((((a)[b])[c]) = ((((a)[b]).c) = ((-(((3).add)(1))) + (((1) * (6)) / (2))))))",
             "(((1) + (2)) + (3)) + (((4) + (5)) * (6))",
             "(((1) != (0)) && ((3) <= (3))) || ((3) > (2))",
         ];
