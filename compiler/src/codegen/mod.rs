@@ -235,6 +235,11 @@ impl Codegen {
     }
 }
 
+pub struct WasmCodegen {
+    wat: String,
+    locals: Vec<InternedStr>,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
