@@ -135,6 +135,7 @@ pub enum Bytecode {
     BrFalse { offset: isize, src: Load },
 
     // Global memory
+    GlobalDeclare(InternedStr), // declare global variable
     GlobalReadOnly(InternedStr), // make GLOBAL[.0] read-only
 
     // Memory

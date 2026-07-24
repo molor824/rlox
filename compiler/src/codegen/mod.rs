@@ -41,7 +41,7 @@ impl FnFrame {
             .rposition(|n| *n == name)
             .map(|i| i as LocalId)
     }
-    fn decl_local_var(&mut self, name: InternedStr) -> LocalId {
+    fn decl_local(&mut self, name: InternedStr) -> LocalId {
         assert_eq!(self.eval_size, 0, "eval_size must be 0 before declaration!");
         let id = self.locals.len();
         self.locals.push(name);
@@ -65,13 +65,13 @@ impl Codegen {
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
         self.bytecodes.push(bytecode);
     }
-    fn decl_variable(&mut self, name: InternedStr) -> Store {
+    fn decl_local(&mut self, name: InternedStr) -> Option<LocalId> {
         match self.frames.last_mut() {
-            Some(f) => Store::Local(f.decl_local_var(name)),
+            Some(f) => Some(f.decl_local(name)),
             None if !self.global_frame.scopes.is_empty() => {
-                Store::Local(self.global_frame.decl_local_var(name))
+                Some(self.global_frame.decl_local(name))
             }
-            _ => Store::Global(name),
+            _ => None,
         }
     }
     fn store_ident(&mut self, name: InternedStr) -> Store {
