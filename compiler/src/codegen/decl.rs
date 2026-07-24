@@ -44,11 +44,11 @@ mod tests {
 
     #[test]
     fn test_decl() {
-        let mut parser = Parser::new("const a = 1 - 2".as_bytes());
+        let mut parser = Parser::new("const a = 1 - 2 + 4".as_bytes());
         let mut codegen = Codegen::default();
 
         codegen
-            .gen_decl(&parser.next_decl(false).unwrap().unwrap())
+            .gen_statement(&parser.next_statement().unwrap().unwrap())
             .unwrap();
 
         for bc in codegen.bytecodes {

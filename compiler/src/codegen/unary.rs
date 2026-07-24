@@ -43,7 +43,7 @@ impl Codegen {
                         }
                     }
                     Some(args) => {
-                        let base = self.total_local_size();
+                        let base = self.total_size();
                         for arg in args {
                             let local = self.push_eval_id();
                             self.gen_expr(arg, Some(Store::Local(local)))?;

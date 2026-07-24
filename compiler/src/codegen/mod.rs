@@ -13,13 +13,16 @@ mod expression;
 mod statement;
 mod unary;
 
+#[derive(PartialEq, Eq)]
 enum ScopeKind {
     Block, // if
     Loop,  // while, for (allows break, continue statements to be used)
 }
 struct Scope {
     kind: ScopeKind,
-    base_eval_size: LocalId, // Evaluation size recorded before the scope creation
+    base_local_size: LocalId, // Evaluation size recorded before the scope creation
+    break_locs: Vec<usize>,   // bytecode locations at which break statements occurred
+    continue_locs: Vec<usize>, // bytecode locations at which continue statements occurred
 }
 #[derive(Default)]
 struct FnFrame {
@@ -42,10 +45,30 @@ impl FnFrame {
             .map(|i| i as LocalId)
     }
     fn decl_local(&mut self, name: InternedStr) -> LocalId {
-        assert_eq!(self.eval_size, 0, "eval_size must be 0 before declaration!");
+        assert_eq!(self.eval_size, 0);
         let id = self.locals.len();
         self.locals.push(name);
         id as LocalId
+    }
+    fn push_scope(&mut self, kind: ScopeKind) {
+        assert_eq!(self.eval_size, 0);
+        self.scopes.push(Scope {
+            kind,
+            base_local_size: self.locals.len() as LocalId,
+            break_locs: vec![],
+            continue_locs: vec![],
+        });
+    }
+    fn pop_scope(&mut self) -> Option<Scope> {
+        assert_eq!(self.eval_size, 0);
+        self.scopes.pop().map(|s| {
+            self.locals.truncate(s.base_local_size as usize);
+            self.eval_size = s.base_local_size - self.locals.len() as LocalId;
+            s
+        })
+    }
+    fn total_size(&self) -> LocalId {
+        self.locals.len() as LocalId + self.eval_size
     }
 }
 
@@ -92,11 +115,8 @@ impl Codegen {
             Load::Global(name)
         }
     }
-    fn total_local_size(&self) -> LocalId {
-        match self.frames.last() {
-            Some(f) => f.eval_size + f.locals.len() as LocalId,
-            None => self.global_frame.eval_size,
-        }
+    fn total_size(&self) -> LocalId {
+        self.last_frame().total_size()
     }
     fn push_eval_id(&mut self) -> LocalId {
         let f = self.last_frame_mut();
