@@ -14,7 +14,7 @@ impl Codegen {
         operator: &SpanOf<&'static str>,
         store_method: Option<Store>,
     ) -> Result<Load> {
-        let store_method = store_method.unwrap_or_else(|| Store::Local(self.gen_eval_id()));
+        let store_method = store_method.unwrap_or_else(|| Store::Local(self.push_eval_id()));
         let left_load = self.gen_expr(left_operand, None)?;
         let span = left_operand.span().concat(right_operand.span());
 
