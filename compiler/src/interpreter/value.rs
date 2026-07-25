@@ -319,7 +319,7 @@ impl Value {
             Self::Nil => false,
             Self::Number(num) => *num != 0.0,
             Self::Array(array) => !array.borrow().is_empty(),
-            Self::String(str) => str.indexable_str().len() != 0,
+            Self::String(str) => str.as_str().len() != 0,
             Self::Bool(bool) => *bool,
             Self::Object(_) | Self::Function(_) => true,
         }

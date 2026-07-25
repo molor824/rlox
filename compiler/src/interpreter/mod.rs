@@ -293,7 +293,7 @@ mod tests {
     use crate::{
         interpreter::{
             bytecode::{Bytecode, Load, Store},
-            string::{IndexableStr, InternedStr, ValueStr},
+            string::{InternedStr, ValueStr},
             value::Value,
             FnBody, FnSignature, Interpreter, UpvalueLoc,
         },
@@ -367,7 +367,7 @@ mod tests {
     }
     #[test]
     fn fibonacci_recursive() {
-        let name = InternedStr::from(IndexableStr::from("fib"));
+        let name = InternedStr::from("fib");
 
         #[rustfmt::skip]
         let bytecode = [
@@ -411,8 +411,8 @@ mod tests {
     }
     #[test]
     fn upvalue_test() {
-        let inc_name = InternedStr::from(IndexableStr::from("inc"));
-        let dec_name = InternedStr::from(IndexableStr::from("dec"));
+        let inc_name = InternedStr::from("inc");
+        let dec_name = InternedStr::from("dec");
 
         #[rustfmt::skip]
         let inc_bytecode = [
