@@ -1,17 +1,23 @@
-use std::{cell::RefCell, fmt, hash::Hash, ops::Add, rc::Rc};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    ops::Add,
+    rc::Rc,
+    sync::{LazyLock, Mutex},
+};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHasher};
 
 #[derive(Debug, Clone)]
 pub enum ValueStr {
     Interned(InternedStr),
-    Owned(Rc<str>),
+    Owned(CachedHash<Rc<str>>),
 }
 impl ValueStr {
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Interned(interned) => interned.0,
-            Self::Owned(owned) => owned,
+            Self::Interned(interned) => &interned.0 .1,
+            Self::Owned(owned) => &owned.1,
         }
     }
 }
@@ -20,10 +26,10 @@ impl PartialEq for ValueStr {
         match self {
             Self::Interned(interned1) => match other {
                 Self::Interned(interned2) => interned1 == interned2,
-                Self::Owned(owned2) => interned1.0 == &**owned2,
+                Self::Owned(owned2) => interned1.0 .1 == &*owned2.1,
             },
             Self::Owned(owned1) => match other {
-                Self::Interned(interned2) => &**owned1 == interned2.0,
+                Self::Interned(interned2) => &*owned1.1 == interned2.0 .1,
                 Self::Owned(owned2) => owned1 == owned2,
             },
         }
@@ -32,13 +38,18 @@ impl PartialEq for ValueStr {
 impl Eq for ValueStr {}
 impl Hash for ValueStr {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.as_str().hash(state);
+        match self {
+            ValueStr::Interned(i) => i.0.hash(state),
+            ValueStr::Owned(o) => o.hash(state),
+        }
     }
 }
 impl Add for &ValueStr {
     type Output = ValueStr;
     fn add(self, rhs: Self) -> Self::Output {
-        ValueStr::Owned((self.as_str().to_string() + rhs.as_str()).into())
+        ValueStr::Owned(CachedHash::from(Rc::from(
+            self.as_str().to_string() + rhs.as_str(),
+        )))
     }
 }
 impl fmt::Display for ValueStr {
@@ -49,30 +60,56 @@ impl fmt::Display for ValueStr {
 
 #[derive(Default)]
 pub struct StrInterner {
-    strings: FxHashSet<&'static str>,
+    strings: FxHashMap<&'static str, InternedStr>,
 }
 impl StrInterner {
     fn add_str(&mut self, str: &str) -> InternedStr {
         match self.strings.get(str) {
-            Some(interned) => InternedStr(*interned),
+            Some(interned) => *interned,
             None => {
-                let str = str.to_string().leak();
-                self.strings.insert(str);
-                InternedStr(str)
+                let str = str.to_string().leak() as &str;
+                let interned = InternedStr(str.into());
+                self.strings.insert(str, interned);
+                interned
             }
         }
     }
 }
 
-thread_local! {
-    static THREAD_INTERNER: RefCell<StrInterner> = RefCell::new(StrInterner::default());
+static INTERNER: LazyLock<Mutex<StrInterner>> =
+    LazyLock::new(|| Mutex::new(StrInterner::default()));
+
+#[derive(Clone, Copy)]
+pub struct CachedHash<T>(u64, T);
+impl<T: Hash> From<T> for CachedHash<T> {
+    fn from(value: T) -> Self {
+        let mut hasher = FxHasher::default();
+        value.hash(&mut hasher);
+        Self(hasher.finish(), value)
+    }
+}
+impl<T: fmt::Debug> fmt::Debug for CachedHash<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", &self.1)
+    }
+}
+impl<T: Eq> Eq for CachedHash<T> {}
+impl<T: PartialEq> PartialEq for CachedHash<T> {
+    fn eq(&self, other: &Self) -> bool {
+        &self.1 == &other.1
+    }
+}
+impl<T> Hash for CachedHash<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct InternedStr(&'static str);
+pub struct InternedStr(CachedHash<&'static str>);
 impl PartialEq for InternedStr {
     fn eq(&self, other: &Self) -> bool {
-        std::ptr::eq(self.0, other.0)
+        std::ptr::eq(self.0 .1, other.0 .1)
     }
 }
 impl Eq for InternedStr {}
@@ -83,6 +120,7 @@ impl Hash for InternedStr {
 }
 impl From<&str> for InternedStr {
     fn from(value: &str) -> Self {
-        THREAD_INTERNER.with(|interner| interner.borrow_mut().add_str(&value))
+        let mut interner = INTERNER.lock().unwrap();
+        interner.add_str(value)
     }
 }
