@@ -25,9 +25,7 @@ impl Codegen {
         match statement {
             Statement::Declaration(decl) => {
                 self.gen_decl(decl)?;
-                if self.last_frame().eval_size != 0 {
-                    self.trunc_eval();
-                }
+                self.last_frame_mut().eval_size = 0;
             }
             Statement::If {
                 condition,
@@ -40,8 +38,7 @@ impl Codegen {
                 let load_cond = self.gen_expr(condition, None)?;
                 let br_index = self.bytecodes.len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
-
-                self.trunc_eval();
+                self.last_frame_mut().eval_size = 0;
 
                 for stmt in &met_block.1 {
                     self.gen_statement(stmt)?;
@@ -60,8 +57,6 @@ impl Codegen {
                     src: load_cond,
                 };
                 if let Some(e) = else_block.as_ref() {
-                    self.trunc_eval();
-
                     for stmt in &e.1 {
                         self.gen_statement(stmt)?;
                     }
@@ -86,7 +81,7 @@ impl Codegen {
                 let load_cond = self.gen_expr(condition, None)?;
                 let skip_start = self.bytecodes.len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
-                self.trunc_eval();
+                self.last_frame_mut().eval_size = 0;
 
                 for stmt in &block.1 {
                     self.gen_statement(stmt)?;
