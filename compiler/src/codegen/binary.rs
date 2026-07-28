@@ -15,15 +15,14 @@ impl Codegen {
         store_method: Option<Store>,
     ) -> Result<Load> {
         let store_method = store_method.unwrap_or_else(|| Store::Local(self.push_eval_id()));
-        let left_load = self.gen_expr(left_operand, None)?;
         let span = left_operand.span().concat(right_operand.span());
 
         match operator.1 {
             "||" | "&&" => {
+                let left_load = self.gen_expr(left_operand, Some(store_method.clone()))?;
                 let condition_bytecode = self.bytecodes.len();
                 self.push_bytecode(SpanOf(span, Bytecode::Nop));
                 self.gen_expr(right_operand, Some(store_method.clone()))?;
-                self.push_bytecode(SpanOf(span, Bytecode::Jump(2)));
                 let offset = (self.bytecodes.len() - condition_bytecode) as isize;
                 self.bytecodes[condition_bytecode].1 = match operator.1 {
                     "||" => Bytecode::BrTrue {
@@ -35,15 +34,9 @@ impl Codegen {
                         src: left_load.clone(),
                     },
                 };
-                self.push_bytecode(SpanOf(
-                    span,
-                    Bytecode::Move {
-                        dst: store_method.clone(),
-                        src: left_load,
-                    },
-                ));
             }
             op => {
+                let left_load = self.gen_expr(left_operand, None)?;
                 let right_load = self.gen_expr(right_operand, None)?;
 
                 #[rustfmt::skip]
@@ -183,17 +176,13 @@ mod tests {
 
         #[rustfmt::skip]
         let expected = [
-            Bytecode::Mul { dst: Store::Local(3), src0: Load::Number(2.0), src1: Load::Number(0.2) },
-            Bytecode::Add { dst: Store::Local(2), src0: Load::Number(0.0), src1: Load::Local(3) },
-            Bytecode::SetNe { dst: Store::Local(1), src0: Load::Number(1.0), src1: Load::Local(2) },
-            Bytecode::BrTrue { offset: 7, src: Load::Local(1) },
-            Bytecode::SetLe { dst: Store::Local(4), src0: Load::Number(3.0), src1: Load::Number(3.0) },
-            Bytecode::BrFalse { offset: 3, src: Load::Local(4) },
+            Bytecode::Mul { dst: Store::Local(2), src0: Load::Number(2.0), src1: Load::Number(0.2) },
+            Bytecode::Add { dst: Store::Local(1), src0: Load::Number(0.0), src1: Load::Local(2) },
+            Bytecode::SetNe { dst: Store::Local(0), src0: Load::Number(1.0), src1: Load::Local(1) },
+            Bytecode::BrTrue { offset: 4, src: Load::Local(0) },
+            Bytecode::SetLe { dst: Store::Local(0), src0: Load::Number(3.0), src1: Load::Number(3.0) },
+            Bytecode::BrFalse { offset: 2, src: Load::Local(0) },
             Bytecode::SetGt { dst: Store::Local(0), src0: Load::Number(3.0), src1: Load::Number(2.0) },
-            Bytecode::Jump(2),
-            Bytecode::Move { dst: Store::Local(0), src: Load::Local(4) },
-            Bytecode::Jump(2),
-            Bytecode::Move { dst: Store::Local(0), src: Load::Local(1) },
         ];
 
         codegen
