@@ -30,6 +30,7 @@ struct FnFrame {
     scopes: Vec<Scope>,
     eval_size: LocalId,
     upvalues: Vec<(InternedStr, UpvalueLoc)>,
+    bytecodes: Vec<SpanOf<Bytecode>>,
 }
 impl FnFrame {
     fn get_upvalue(&self, name: InternedStr) -> Option<LocalId> {
@@ -74,7 +75,6 @@ impl FnFrame {
 
 #[derive(Default)]
 pub struct Codegen {
-    bytecodes: Vec<SpanOf<Bytecode>>,
     frames: Vec<FnFrame>,
     global_frame: FnFrame,
 }
@@ -85,8 +85,26 @@ impl Codegen {
     fn last_frame_mut(&mut self) -> &mut FnFrame {
         self.frames.last_mut().unwrap_or(&mut self.global_frame)
     }
+    fn push_frame(&mut self) {
+        self.frames.push(FnFrame {
+            locals: vec![],
+            scopes: vec![],
+            eval_size: 0,
+            upvalues: vec![],
+            bytecodes: vec![],
+        });
+    }
+    fn pop_frame(&mut self) -> Option<FnFrame> {
+        self.frames.pop()
+    }
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
-        self.bytecodes.push(bytecode);
+        self.last_frame_mut().bytecodes.push(bytecode);
+    }
+    pub fn bytecodes(&self) -> &[SpanOf<Bytecode>] {
+        &self.last_frame().bytecodes
+    }
+    fn bytecodes_mut(&mut self) -> &mut [SpanOf<Bytecode>] {
+        &mut self.last_frame_mut().bytecodes
     }
     fn decl_local(&mut self, name: InternedStr) -> Option<LocalId> {
         match self.frames.last_mut() {

@@ -157,7 +157,7 @@ mod tests {
         ];
         let mut codegen = Codegen::default();
         codegen.gen_expr(&result, None).unwrap();
-        for (bc, expected) in codegen.bytecodes.into_iter().zip(expected) {
+        for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
             assert_eq!(bc.1, expected);
         }

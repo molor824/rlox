@@ -104,11 +104,11 @@ impl<R: BufRead> Parser<R> {
         let Some(body) = self.next_body(skip_newline)? else {
             return Err(self.error(slash.concat(arrow), ErrorKind::ExpectedFuncBody));
         };
-        Ok(Some(Expression::Closure {
+        Ok(Some(Expression::Closure(Closure {
             params: SpanOf(slash.concat(arrow), params),
             variadic,
             body: body.into(),
-        }))
+        })))
     }
     pub fn next_primary(&mut self, skip_newline: bool) -> Result<Option<Expression>> {
         let methods = [

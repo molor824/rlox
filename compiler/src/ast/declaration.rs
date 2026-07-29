@@ -77,32 +77,30 @@ impl GetSpan for FunctionBody {
 pub struct FuncDecl {
     pub fn_keyword: Span,
     pub ident: SourceSpan,
-    pub params: SpanOf<Vec<SourceSpan>>,
-    pub variadic: Option<SpanOf<SourceSpan>>,
-    pub body: FunctionBody,
+    pub closure: Closure,
 }
 impl GetSpan for FuncDecl {
     fn span(&self) -> Span {
-        self.fn_keyword.concat(self.body.span())
+        self.fn_keyword.concat(self.closure.span())
     }
 }
 impl fmt::Display for FuncDecl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "fn {}", self.ident)?;
         write!(f, "(")?;
-        for (i, param) in self.params.1.iter().enumerate() {
+        for (i, param) in self.closure.params.1.iter().enumerate() {
             if i != 0 {
                 write!(f, ", ")?;
             }
             write!(f, "{}", param)?;
         }
-        if let Some(variadic) = &self.variadic {
-            if !self.params.1.is_empty() {
+        if let Some(variadic) = &self.closure.variadic {
+            if !self.closure.params.1.is_empty() {
                 write!(f, ", ")?;
             }
             write!(f, "*{}", variadic.1)?;
         }
-        write!(f, ") {}", self.body)
+        write!(f, ") {}", self.closure.body)
     }
 }
 
@@ -132,9 +130,11 @@ impl<R: BufRead> Parser<R> {
         Ok(Some(Declaration::FuncDecl(FuncDecl {
             fn_keyword: fn_kwd.0,
             ident,
-            params: SpanOf(paren_start.concat(paren_end), params),
-            variadic,
-            body,
+            closure: Closure {
+                params: SpanOf(paren_start.concat(paren_end), params),
+                variadic,
+                body: Box::new(body),
+            },
         })))
     }
     fn next_var_decl(&mut self, skip_newline: bool) -> Result<Option<Declaration>> {

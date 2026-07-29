@@ -20,11 +20,11 @@ impl Codegen {
         match operator.1 {
             "||" | "&&" => {
                 let left_load = self.gen_expr(left_operand, Some(store_method.clone()))?;
-                let condition_bytecode = self.bytecodes.len();
+                let condition_bytecode = self.bytecodes().len();
                 self.push_bytecode(SpanOf(span, Bytecode::Nop));
                 self.gen_expr(right_operand, Some(store_method.clone()))?;
-                let offset = (self.bytecodes.len() - condition_bytecode) as isize;
-                self.bytecodes[condition_bytecode].1 = match operator.1 {
+                let offset = (self.bytecodes().len() - condition_bytecode) as isize;
+                self.bytecodes_mut()[condition_bytecode].1 = match operator.1 {
                     "||" => Bytecode::BrTrue {
                         offset,
                         src: left_load.clone(),
@@ -163,7 +163,7 @@ mod tests {
             Bytecode::Move { dst: Store::Global("b".into()), src: Load::Local(0) },
             Bytecode::Move { dst: Store::Global("a".into()), src: Load::Local(0) },
         ];
-        for (bc, expected) in codegen.bytecodes.into_iter().zip(expected) {
+        for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
             assert_eq!(bc.1, expected);
         }
@@ -188,7 +188,7 @@ mod tests {
         codegen
             .gen_expr(&parser.next_expression(false).unwrap().unwrap(), None)
             .unwrap();
-        for (bc, expected) in codegen.bytecodes.iter().zip(expected) {
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
             assert_eq!(bc.1, expected);
         }

@@ -45,7 +45,13 @@ pub enum FnBody {
 impl fmt::Debug for FnBody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bytecode(code) => f.debug_tuple("Bytecode").field(&code.len()).finish(),
+            Self::Bytecode(code) => {
+                writeln!(f, "Bytecodes[")?;
+                for bc in code {
+                    writeln!(f, "  {}", format!("{:?}", bc.1).replace("\n", "\n  "))?;
+                }
+                write!(f, "]")
+            }
             Self::Builtin(builtin) => f
                 .debug_tuple("Builtin")
                 .field(&(builtin.as_ref() as *const _))

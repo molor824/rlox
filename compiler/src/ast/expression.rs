@@ -16,6 +16,18 @@ impl<R: BufRead> Parser<R> {
 }
 
 #[derive(Debug)]
+pub struct Closure {
+    pub params: SpanOf<Vec<SourceSpan>>,
+    pub variadic: Option<SpanOf<SourceSpan>>,
+    pub body: Box<FunctionBody>,
+}
+impl GetSpan for Closure {
+    fn span(&self) -> Span {
+        self.params.0.concat(self.body.span())
+    }
+}
+
+#[derive(Debug)]
 pub enum Expression {
     Ident(SourceSpan),
     String(SpanOf<String>),
@@ -41,11 +53,7 @@ pub enum Expression {
         assignee: Assignee,
         assigner: Box<Expression>,
     },
-    Closure {
-        params: SpanOf<Vec<SourceSpan>>,      // Covers \params ->
-        variadic: Option<SpanOf<SourceSpan>>, // Covers *a
-        body: Box<FunctionBody>,
-    },
+    Closure(Closure),
 }
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -81,11 +89,11 @@ impl fmt::Display for Expression {
                 right_operand,
             } => write!(f, "({left_operand}) {} ({right_operand})", operator.1),
             Self::Assign { assignee, assigner } => write!(f, "({assignee}) = ({assigner})"),
-            Self::Closure {
+            Self::Closure(Closure {
                 params,
                 body,
                 variadic,
-            } => {
+            }) => {
                 write!(f, "\\")?;
                 let mut first = true;
                 for p in params.1.iter() {
@@ -127,7 +135,7 @@ impl GetSpan for Expression {
                 .concat(right_operand.span())
                 .concat(operator.0),
             Self::Assign { assignee, assigner } => assignee.span().concat(assigner.span()),
-            Self::Closure { params, body, .. } => params.0.concat(body.span()),
+            Self::Closure(closure) => closure.span(),
         }
     }
 }

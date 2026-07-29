@@ -36,7 +36,7 @@ impl Codegen {
                 self.push_scope(ScopeKind::Block);
 
                 let load_cond = self.gen_expr(condition, None)?;
-                let br_index = self.bytecodes.len();
+                let br_index = self.bytecodes().len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
                 self.last_frame_mut().eval_size = 0;
 
@@ -46,13 +46,13 @@ impl Codegen {
 
                 // If else exists, add jump to skip it
                 let skip_index = else_block.as_ref().map(|_| {
-                    let idx = self.bytecodes.len();
+                    let idx = self.bytecodes().len();
                     self.push_bytecode(SpanOf(met_block.0, Bytecode::Nop));
                     idx
                 });
 
-                let br_until = self.bytecodes.len();
-                self.bytecodes[br_index].1 = Bytecode::BrFalse {
+                let br_until = self.bytecodes().len();
+                self.bytecodes_mut()[br_index].1 = Bytecode::BrFalse {
                     offset: br_until as isize - br_index as isize,
                     src: load_cond,
                 };
@@ -64,8 +64,8 @@ impl Codegen {
 
                 // fill in skip_index if exists
                 if let Some(idx) = skip_index {
-                    let current = self.bytecodes.len();
-                    self.bytecodes[idx].1 = Bytecode::Jump(current as isize - idx as isize);
+                    let current = self.bytecodes().len();
+                    self.bytecodes_mut()[idx].1 = Bytecode::Jump(current as isize - idx as isize);
                 }
 
                 self.pop_scope();
@@ -76,10 +76,10 @@ impl Codegen {
             } => {
                 self.push_scope(ScopeKind::Loop);
 
-                let continue_at = self.bytecodes.len();
+                let continue_at = self.bytecodes().len();
 
                 let load_cond = self.gen_expr(condition, None)?;
-                let skip_start = self.bytecodes.len();
+                let skip_start = self.bytecodes().len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
                 self.last_frame_mut().eval_size = 0;
 
@@ -87,14 +87,14 @@ impl Codegen {
                     self.gen_statement(stmt)?;
                 }
 
-                let continue_from = self.bytecodes.len();
+                let continue_from = self.bytecodes().len();
                 self.push_bytecode(SpanOf(
                     block.0,
                     Bytecode::Jump(continue_at as isize - continue_from as isize),
                 ));
 
-                let skip_until = self.bytecodes.len();
-                self.bytecodes[skip_start].1 = Bytecode::BrFalse {
+                let skip_until = self.bytecodes().len();
+                self.bytecodes_mut()[skip_start].1 = Bytecode::BrFalse {
                     offset: skip_until as isize - skip_start as isize,
                     src: load_cond,
                 };
@@ -131,7 +131,7 @@ mod tests {
             codegen.gen_statement(&stmt).unwrap();
         }
 
-        for bc in codegen.bytecodes {
+        for bc in codegen.bytecodes() {
             println!("{:?}", bc.1);
         }
     }
@@ -155,7 +155,7 @@ mod tests {
             .gen_statement(&parser.next_statement().unwrap().unwrap())
             .unwrap();
 
-        for bc in codegen.bytecodes {
+        for bc in codegen.bytecodes() {
             println!("{:?}", bc.1);
         }
     }

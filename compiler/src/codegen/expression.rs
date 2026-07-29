@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{
     ast::expression::{Element, Expression, Pair},
     codegen::Codegen,
@@ -159,6 +161,22 @@ impl Codegen {
                 }
                 None => Ok(Load::String(str.1.as_str().into())),
             },
+            Expression::Closure(closure) => {
+                let sig = self.create_func_sig(closure)?;
+                match store_method {
+                    Some(store) => {
+                        self.push_bytecode(SpanOf(
+                            closure.span(),
+                            Bytecode::Move {
+                                dst: store.clone(),
+                                src: Load::Function(Rc::new(sig)),
+                            },
+                        ));
+                        Ok(store.to_load())
+                    }
+                    None => Ok(Load::Function(Rc::new(sig))),
+                }
+            }
             Expression::Array(arr) => self.gen_array(arr, store_method),
             Expression::Object(obj) => self.gen_object(obj, store_method),
             Expression::Ident(ident) => {
@@ -191,7 +209,6 @@ impl Codegen {
             Expression::Assign { assignee, assigner } => {
                 self.gen_assign(assignee, assigner, store_method)
             }
-            _ => todo!(),
         }
     }
 }
@@ -227,7 +244,7 @@ mod tests {
         codegen
             .gen_expr(&result, Some(Store::Global(test_ident)))
             .unwrap();
-        for (bc, expected) in codegen.bytecodes.into_iter().zip(expected) {
+        for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
             assert_eq!(bc.1, expected);
         }
