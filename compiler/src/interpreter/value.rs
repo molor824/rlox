@@ -1,5 +1,5 @@
 use crate::error::ErrorKind;
-use crate::interpreter::string::ValueStr;
+use crate::interpreter::string::{CachedHash, ValueStr};
 use crate::interpreter::FnSignature;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
@@ -131,7 +131,7 @@ impl Hash for Value {
     }
 }
 impl Value {
-    fn type_str(&self) -> &'static str {
+    pub(crate) fn type_str(&self) -> &'static str {
         match self {
             Self::Nil => "nil",
             Self::Bool(_) => "boolean",
@@ -140,6 +140,44 @@ impl Value {
             Self::Array(_) => "array",
             Self::Object(_) => "object",
             Self::Function(_) => "function",
+        }
+    }
+    pub fn try_array(self) -> Result<Rc<RefCell<Vec<Value>>>, ErrorKind> {
+        match self {
+            Self::Array(arr) => Ok(arr),
+            v => Err(ErrorKind::InvalidType(v.type_str(), "array")),
+        }
+    }
+    pub fn try_object(self) -> Result<Rc<RefCell<Object>>, ErrorKind> {
+        match self {
+            Self::Object(obj) => Ok(obj),
+            v => Err(ErrorKind::InvalidType(v.type_str(), "object")),
+        }
+    }
+    pub fn try_iterator(self) -> Result<Box<dyn Iterator<Item = Value>>, ErrorKind> {
+        match self {
+            Self::Array(arr) => Ok(Box::new(arr.borrow().clone().into_iter())),
+            Self::Object(obj) => Ok(Box::new(
+                obj.borrow()
+                    .map
+                    .iter()
+                    .map(|(k, v)| Value::Array(Rc::new(RefCell::new(vec![k.clone(), v.clone()]))))
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            )),
+            Self::String(str) => {
+                let mut idx = 0;
+                let str = str.as_str().to_string();
+                Ok(Box::new(std::iter::from_fn(move || {
+                    let mut chars = str[idx..].chars();
+                    let ch = chars.next();
+                    ch.map(|ch| {
+                        idx += ch.len_utf8();
+                        Value::String(ValueStr::Owned(CachedHash::from(Rc::from(ch.to_string()))))
+                    })
+                })))
+            }
+            _ => Err(ErrorKind::UniterableType(self.type_str())),
         }
     }
     pub fn try_add(&self, other: &Self) -> Result<Self, ErrorKind> {

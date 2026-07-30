@@ -90,7 +90,12 @@ impl<T: Hash> From<T> for CachedHash<T> {
 }
 impl<T: fmt::Debug> fmt::Debug for CachedHash<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", &self.1)
+        write!(f, "{:?}", self.1)
+    }
+}
+impl<T: fmt::Display> fmt::Display for CachedHash<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.1)
     }
 }
 impl<T: Eq> Eq for CachedHash<T> {}
@@ -122,5 +127,10 @@ impl From<&str> for InternedStr {
     fn from(value: &str) -> Self {
         let mut interner = INTERNER.lock().unwrap();
         interner.add_str(value)
+    }
+}
+impl fmt::Display for InternedStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

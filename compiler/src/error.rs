@@ -1,6 +1,9 @@
 use std::{cell::RefCell, fmt, io, rc::Rc};
 
-use crate::{interpreter::string::ValueStr, span::Span};
+use crate::{
+    interpreter::string::{InternedStr, ValueStr},
+    span::Span,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
@@ -66,12 +69,18 @@ pub enum ErrorKind {
     InvalidUnary(&'static str, &'static str),
     #[error("Cannot convert `{0}` to `{1}`")]
     InvalidType(&'static str, &'static str),
+    #[error("Type `{0}` is not iterable")]
+    UniterableType(&'static str),
     #[error("Cannot index with nil value")]
     NilIndexing,
     #[error("Cannot index with nan value")]
     NanIndexing,
     #[error("Attempted to write to read-only global `{0}`")]
-    ReadonlyGlobalWrite(ValueStr),
+    ConstGlobal(InternedStr),
+    #[error("Attempted to write to undeclared global variable `{0}`")]
+    UndeclaredGlobal(InternedStr),
+    #[error("Attempted to redeclare global variable `{0}`")]
+    RedeclareGlobal(InternedStr),
     #[error("Attempted to share a memory that is not initialized")]
     UninitCellShare,
     #[error("Attempted to index array with non-number value")]

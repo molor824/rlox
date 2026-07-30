@@ -4,9 +4,10 @@ use std::mem;
 use std::rc::Rc;
 
 use crate::error::ErrorKind;
-use crate::interpreter::{bytecode::Bytecode, string::ValueStr, value::Function, value::Value};
+use crate::interpreter::string::InternedStr;
+use crate::interpreter::{bytecode::Bytecode, value::Function, value::Value};
 use crate::span::SpanOf;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 pub mod bytecode;
 pub mod string;
@@ -74,8 +75,7 @@ impl Default for Cell {
 pub struct Interpreter {
     memory: Vec<Cell>,
     current_frame: Option<FunctionFrame>,
-    globals: FxHashMap<ValueStr, Value>,
-    readonly_globals: FxHashSet<ValueStr>,
+    globals: FxHashMap<InternedStr, (Value, bool)>, // true - read-only
 }
 impl Default for Interpreter {
     fn default() -> Self {
@@ -83,7 +83,6 @@ impl Default for Interpreter {
         Self {
             memory: Vec::with_capacity(STACK_SIZE),
             current_frame: None,
-            readonly_globals: FxHashSet::default(),
             globals: FxHashMap::default(),
         }
     }
@@ -152,17 +151,27 @@ impl Interpreter {
             Err(ErrorKind::InvalidUpvalueAccess)
         }
     }
-    fn make_global_read_only(&mut self, id: ValueStr) {
-        self.readonly_globals.insert(id);
+    fn make_global_read_only(&mut self, name: InternedStr) {
+        self.globals.get_mut(&name).map(|global| global.1 = true);
     }
-    fn get_global(&self, id: ValueStr) -> Value {
-        self.globals.get(&id).cloned().unwrap_or_default()
+    fn get_global(&self, name: InternedStr) -> Value {
+        self.globals.get(&name).cloned().unwrap_or_default().0
     }
-    fn set_global(&mut self, id: ValueStr, new_value: Value) -> Result<(), ErrorKind> {
-        if self.readonly_globals.contains(&id) {
-            return Err(ErrorKind::ReadonlyGlobalWrite(id));
+    fn set_global(&mut self, name: InternedStr, new_value: Value) -> Result<(), ErrorKind> {
+        match self.globals.get_mut(&name) {
+            Some((_, true)) => Err(ErrorKind::ConstGlobal(name)),
+            Some((value, _)) => {
+                *value = new_value;
+                Ok(())
+            }
+            None => Err(ErrorKind::UndeclaredGlobal(name)),
         }
-        self.globals.insert(id, new_value);
+    }
+    fn declare_global(&mut self, name: InternedStr) -> Result<(), ErrorKind> {
+        if self.globals.contains_key(&name) {
+            return Err(ErrorKind::RedeclareGlobal(name));
+        }
+        self.globals.insert(name, (Value::Nil, false));
         Ok(())
     }
     fn truncate(&mut self, new_len: usize) -> Result<(), ErrorKind> {
@@ -395,7 +404,7 @@ mod tests {
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
         interpreter
-            .set_global(ValueStr::Interned(name), Value::Function(function.clone()))
+            .set_global(name, Value::Function(function.clone()))
             .unwrap();
 
         let mut a = 0.0;

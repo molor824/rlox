@@ -44,7 +44,7 @@ impl Load {
                 interpreter.get_local(interpreter.get_local(*id).as_number()? as LocalId)
             }
             Self::Upvalue(id) => interpreter.get_upvalue(*id)?,
-            Self::Global(id) => interpreter.get_global(ValueStr::Interned(*id)),
+            Self::Global(id) => interpreter.get_global(*id),
             Self::Nil => Value::Nil,
             Self::Bool(b) => Value::Bool(*b),
             Self::Number(n) => Value::Number(*n),
@@ -80,7 +80,7 @@ impl Store {
                 interpreter.get_local(*id).as_number()? as LocalId,
                 new_value,
             ),
-            Self::Global(id) => interpreter.set_global(ValueStr::Interned(*id), new_value),
+            Self::Global(id) => interpreter.set_global(*id, new_value),
             Self::Upvalue(id) => interpreter.set_upvalue(*id, new_value),
             Self::Nil => Ok(()),
         }
@@ -259,9 +259,8 @@ impl Bytecode {
                 let value = src.load(interpreter)?;
                 dst.store(interpreter, Value::Bool(!value.as_bool()))?;
             }
-            Bytecode::GlobalReadOnly(id) => {
-                interpreter.make_global_read_only(ValueStr::Interned(*id))
-            }
+            Bytecode::GlobalReadOnly(name) => interpreter.make_global_read_only(*name),
+            Bytecode::GlobalDeclare(name) => interpreter.declare_global(*name)?,
             Bytecode::LoadProperty { dst, src, prop } => {
                 let property = src
                     .load(interpreter)?
@@ -358,6 +357,30 @@ impl Bytecode {
                 let function = src.load(interpreter)?.as_callable()?;
                 let value = interpreter.call_function(function, *base)?;
                 dst.store(interpreter, value)?;
+            }
+            Bytecode::AppendElement { dst, src } => {
+                dst.load(interpreter)?
+                    .try_array()?
+                    .borrow_mut()
+                    .push(src.load(interpreter)?);
+            }
+            Bytecode::AppendElements { dst, src } => {
+                dst.load(interpreter)?
+                    .try_array()?
+                    .borrow_mut()
+                    .extend(src.load(interpreter)?.try_iterator()?);
+            }
+            Bytecode::StoreProperties { dst, src } => {
+                let dst_obj = dst.load(interpreter)?;
+                let src_iter = src.load(interpreter)?.try_iterator()?;
+
+                for v in src_iter {
+                    let arr = v.try_array()?;
+                    dst_obj.set_property(
+                        arr.borrow().get(0).cloned().unwrap_or_default(),
+                        arr.borrow().get(1).cloned().unwrap_or_default(),
+                    )?;
+                }
             }
             bc => todo!("{bc:?} is not implemented yet!"),
         }
