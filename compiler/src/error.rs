@@ -1,9 +1,6 @@
 use std::{cell::RefCell, fmt, io, rc::Rc};
 
-use crate::{
-    interpreter::string::{InternedStr, ValueStr},
-    span::Span,
-};
+use crate::{interpreter::string::ValueStr, span::Span};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ErrorKind {
@@ -76,11 +73,11 @@ pub enum ErrorKind {
     #[error("Cannot index with nan value")]
     NanIndexing,
     #[error("Attempted to write to read-only global `{0}`")]
-    ConstGlobal(InternedStr),
+    ConstGlobal(ValueStr),
     #[error("Attempted to write to undeclared global variable `{0}`")]
-    UndeclaredGlobal(InternedStr),
+    UndeclaredGlobal(ValueStr),
     #[error("Attempted to redeclare global variable `{0}`")]
-    RedeclareGlobal(InternedStr),
+    RedeclareGlobal(ValueStr),
     #[error("Attempted to share a memory that is not initialized")]
     UninitCellShare,
     #[error("Attempted to index array with non-number value")]

@@ -1,5 +1,5 @@
 use crate::error::ErrorKind;
-use crate::interpreter::string::{InternedStr, ValueStr};
+use crate::interpreter::string::ValueStr;
 use crate::interpreter::value::{Object, Value};
 use crate::interpreter::{FnSignature, Interpreter, LocalId};
 use std::cell::RefCell;
@@ -10,11 +10,11 @@ pub enum Load {
     Local(LocalId),
     LocalIndirect(LocalId),
     Upvalue(LocalId),
-    Global(InternedStr),
+    Global(ValueStr),
     Nil,
     Bool(bool),
     Number(f64),
-    String(InternedStr),
+    String(ValueStr),
     Function(Rc<FnSignature>),
     Array(usize),
     Object(usize),
@@ -44,11 +44,11 @@ impl Load {
                 interpreter.get_local(interpreter.get_local(*id).as_number()? as LocalId)
             }
             Self::Upvalue(id) => interpreter.get_upvalue(*id)?,
-            Self::Global(id) => interpreter.get_global(*id),
+            Self::Global(id) => interpreter.get_global(id.clone()),
             Self::Nil => Value::Nil,
             Self::Bool(b) => Value::Bool(*b),
             Self::Number(n) => Value::Number(*n),
-            Self::String(s) => Value::String(ValueStr::Interned(*s)),
+            Self::String(s) => Value::String(s.clone()),
             Self::Function(s) => Value::Function(Rc::new(interpreter.create_function(s.clone())?)),
             Self::Array(c) => Value::Array(Rc::new(RefCell::new(Vec::with_capacity(*c)))),
             Self::Object(c) => Value::Object(Rc::new(RefCell::new(Object::with_capacity(*c)))),
@@ -59,7 +59,7 @@ impl Load {
 pub enum Store {
     Local(LocalId),
     LocalIndirect(LocalId),
-    Global(InternedStr),
+    Global(ValueStr),
     Upvalue(LocalId),
     Nil,
 }
@@ -68,7 +68,7 @@ impl Store {
         match self {
             Self::Local(id) => Load::Local(*id),
             Self::LocalIndirect(id) => Load::LocalIndirect(*id),
-            Self::Global(id) => Load::Global(*id),
+            Self::Global(id) => Load::Global(id.clone()),
             Self::Upvalue(id) => Load::Upvalue(*id),
             Self::Nil => Load::Nil,
         }
@@ -80,7 +80,7 @@ impl Store {
                 interpreter.get_local(*id).as_number()? as LocalId,
                 new_value,
             ),
-            Self::Global(id) => interpreter.set_global(*id, new_value),
+            Self::Global(id) => interpreter.set_global(id.clone(), new_value),
             Self::Upvalue(id) => interpreter.set_upvalue(*id, new_value),
             Self::Nil => Ok(()),
         }
@@ -135,17 +135,17 @@ pub enum Bytecode {
     BrFalse { offset: isize, src: Load },
 
     // Global memory
-    GlobalDeclare(InternedStr), // declare global variable
-    GlobalReadOnly(InternedStr), // make GLOBAL[.0] read-only
+    GlobalDeclare(ValueStr), // declare global variable
+    GlobalReadOnly(ValueStr), // make GLOBAL[.0] read-only
 
     // Memory
     Move { dst: Store, src: Load }, // [.0] = [.1]
     Truncate(usize), // truncates till .0
 
     // Property
-    LoadProperty { dst: Store, src: Load, prop: InternedStr }, // [.0] = [.1].(.2) --- Equivalent to a.b
-    LoadMethod { dst: Store, src: Load, prop: InternedStr }, // [.0] = [.1]:(.2) --- Equivalent to a:b, returns closure that internally calls `a.b(a, ...)`
-    StoreProperty { dst: Load, src: Load, prop: InternedStr }, // [.0].1 = [.2] --- Equivalent to a.b = c
+    LoadProperty { dst: Store, src: Load, prop: ValueStr }, // [.0] = [.1].(.2) --- Equivalent to a.b
+    LoadMethod { dst: Store, src: Load, prop: ValueStr }, // [.0] = [.1]:(.2) --- Equivalent to a:b, returns closure that internally calls `a.b(a, ...)`
+    StoreProperty { dst: Load, src: Load, prop: ValueStr }, // [.0].1 = [.2] --- Equivalent to a.b = c
     LoadPropertyIndirect { dst: Store, src: Load, prop: Load }, // [.0] = [.1][[.2]] --- Equivalent to a[b]
     StorePropertyIndirect { dst: Load, src: Load, prop: Load }, // [.0][[.1]] = [.2] --- Equivalent to a[b] = c
 
@@ -259,18 +259,18 @@ impl Bytecode {
                 let value = src.load(interpreter)?;
                 dst.store(interpreter, Value::Bool(!value.as_bool()))?;
             }
-            Bytecode::GlobalReadOnly(name) => interpreter.make_global_read_only(*name),
-            Bytecode::GlobalDeclare(name) => interpreter.declare_global(*name)?,
+            Bytecode::GlobalReadOnly(name) => interpreter.make_global_read_only(name.clone()),
+            Bytecode::GlobalDeclare(name) => interpreter.declare_global(name.clone())?,
             Bytecode::LoadProperty { dst, src, prop } => {
                 let property = src
                     .load(interpreter)?
-                    .get_property(&Value::String(ValueStr::Interned(*prop)))?;
+                    .get_property(&Value::String(prop.clone()))?;
                 dst.store(interpreter, property)?;
             }
             Bytecode::LoadMethod { dst, src, prop } => {
                 let itself = src.load(interpreter)?;
                 let function = itself
-                    .get_property(&Value::String(ValueStr::Interned(*prop)))?
+                    .get_property(&Value::String(prop.clone()))?
                     .as_callable()?;
                 let method = Rc::new(interpreter.method_currying(itself, function)?);
                 dst.store(interpreter, Value::Function(method))?;
@@ -284,7 +284,7 @@ impl Bytecode {
             Bytecode::StoreProperty { dst, src, prop } => {
                 let value = src.load(interpreter)?;
                 let obj = dst.load(interpreter)?;
-                obj.set_property(Value::String(ValueStr::Interned(*prop)), value)?;
+                obj.set_property(Value::String(prop.clone()), value)?;
             }
             Bytecode::StorePropertyIndirect { dst, src, prop } => {
                 let value = src.load(interpreter)?;

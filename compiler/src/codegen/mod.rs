@@ -1,7 +1,7 @@
 use crate::{
     interpreter::{
         bytecode::{Bytecode, Load, Store},
-        string::InternedStr,
+        string::ValueStr,
         LocalId, UpvalueLoc,
     },
     span::SpanOf,
@@ -26,26 +26,26 @@ struct Scope {
 }
 #[derive(Default)]
 struct FnFrame {
-    locals: Vec<InternedStr>,
+    locals: Vec<ValueStr>,
     scopes: Vec<Scope>,
     eval_size: LocalId,
-    upvalues: Vec<(InternedStr, UpvalueLoc)>,
+    upvalues: Vec<(ValueStr, UpvalueLoc)>,
     bytecodes: Vec<SpanOf<Bytecode>>,
 }
 impl FnFrame {
-    fn get_upvalue(&self, name: InternedStr) -> Option<LocalId> {
+    fn get_upvalue(&self, name: ValueStr) -> Option<LocalId> {
         self.upvalues
             .iter()
             .rposition(|n| n.0 == name)
             .map(|i| i as LocalId)
     }
-    fn get_local_var(&self, name: InternedStr) -> Option<LocalId> {
+    fn get_local_var(&self, name: ValueStr) -> Option<LocalId> {
         self.locals
             .iter()
             .rposition(|n| *n == name)
             .map(|i| i as LocalId)
     }
-    fn decl_local(&mut self, name: InternedStr) -> LocalId {
+    fn decl_local(&mut self, name: ValueStr) -> LocalId {
         assert_eq!(self.eval_size, 0);
         let id = self.locals.len();
         self.locals.push(name);
@@ -106,7 +106,7 @@ impl Codegen {
     fn bytecodes_mut(&mut self) -> &mut [SpanOf<Bytecode>] {
         &mut self.last_frame_mut().bytecodes
     }
-    fn decl_local(&mut self, name: InternedStr) -> Option<LocalId> {
+    fn decl_local(&mut self, name: ValueStr) -> Option<LocalId> {
         match self.frames.last_mut() {
             Some(f) => Some(f.decl_local(name)),
             None if !self.global_frame.scopes.is_empty() => {
@@ -115,19 +115,19 @@ impl Codegen {
             _ => None,
         }
     }
-    fn store_ident(&mut self, name: InternedStr) -> Store {
-        if let Some(id) = self.get_local_var(name) {
+    fn store_ident(&mut self, name: ValueStr) -> Store {
+        if let Some(id) = self.get_local_var(name.clone()) {
             Store::Local(id)
-        } else if let Some(id) = self.get_upvalue(name) {
+        } else if let Some(id) = self.get_upvalue(name.clone()) {
             Store::Upvalue(id)
         } else {
             Store::Global(name)
         }
     }
-    fn load_ident(&mut self, name: InternedStr) -> Load {
-        if let Some(id) = self.get_local_var(name) {
+    fn load_ident(&mut self, name: ValueStr) -> Load {
+        if let Some(id) = self.get_local_var(name.clone()) {
             Load::Local(id)
-        } else if let Some(id) = self.get_upvalue(name) {
+        } else if let Some(id) = self.get_upvalue(name.clone()) {
             Load::Upvalue(id)
         } else {
             Load::Global(name)
@@ -142,33 +142,33 @@ impl Codegen {
         f.eval_size += 1;
         id
     }
-    fn get_local_var(&self, name: InternedStr) -> Option<LocalId> {
+    fn get_local_var(&self, name: ValueStr) -> Option<LocalId> {
         self.last_frame().get_local_var(name)
     }
-    fn get_upvalue(&mut self, name: InternedStr) -> Option<LocalId> {
+    fn get_upvalue(&mut self, name: ValueStr) -> Option<LocalId> {
         let f = self.frames.last_mut()?;
-        if let Some(idx) = f.get_upvalue(name) {
+        if let Some(idx) = f.get_upvalue(name.clone()) {
             Some(idx as LocalId)
         } else {
             for idx in (0..(self.frames.len() - 1)).rev() {
-                if let Some(mut id) = self.frames[idx].get_upvalue(name) {
+                if let Some(mut id) = self.frames[idx].get_upvalue(name.clone()) {
                     // found id in parent frame's upvalue, propagate
                     for i in (idx + 1)..self.frames.len() {
                         let f = &mut self.frames[i];
-                        f.upvalues.push((name, UpvalueLoc::Shared(id)));
+                        f.upvalues.push((name.clone(), UpvalueLoc::Shared(id)));
                         id = f.upvalues.len() as LocalId - 1;
                     }
                     return Some(id);
                 }
-                if let Some(mut id) = self.frames[idx].get_local_var(name) {
+                if let Some(mut id) = self.frames[idx].get_local_var(name.clone()) {
                     // found id, add upvalue to the inner frame
                     let f = &mut self.frames[idx + 1];
-                    f.upvalues.push((name, UpvalueLoc::Local(id)));
+                    f.upvalues.push((name.clone(), UpvalueLoc::Local(id)));
                     // now propagate inner by each parent frame's indices
                     id = f.upvalues.len() as LocalId - 1;
                     for i in (idx + 2)..self.frames.len() {
                         let f = &mut self.frames[i];
-                        f.upvalues.push((name, UpvalueLoc::Shared(id)));
+                        f.upvalues.push((name.clone(), UpvalueLoc::Shared(id)));
                         id = f.upvalues.len() as LocalId - 1;
                     }
                     return Some(id);

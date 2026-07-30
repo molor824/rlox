@@ -4,7 +4,7 @@ use std::mem;
 use std::rc::Rc;
 
 use crate::error::ErrorKind;
-use crate::interpreter::string::InternedStr;
+use crate::interpreter::string::ValueStr;
 use crate::interpreter::{bytecode::Bytecode, value::Function, value::Value};
 use crate::span::SpanOf;
 use rustc_hash::FxHashMap;
@@ -75,7 +75,7 @@ impl Default for Cell {
 pub struct Interpreter {
     memory: Vec<Cell>,
     current_frame: Option<FunctionFrame>,
-    globals: FxHashMap<InternedStr, (Value, bool)>, // true - read-only
+    globals: FxHashMap<ValueStr, (Value, bool)>, // true - read-only
 }
 impl Default for Interpreter {
     fn default() -> Self {
@@ -151,13 +151,13 @@ impl Interpreter {
             Err(ErrorKind::InvalidUpvalueAccess)
         }
     }
-    fn make_global_read_only(&mut self, name: InternedStr) {
+    fn make_global_read_only(&mut self, name: ValueStr) {
         self.globals.get_mut(&name).map(|global| global.1 = true);
     }
-    fn get_global(&self, name: InternedStr) -> Value {
+    fn get_global(&self, name: ValueStr) -> Value {
         self.globals.get(&name).cloned().unwrap_or_default().0
     }
-    fn set_global(&mut self, name: InternedStr, new_value: Value) -> Result<(), ErrorKind> {
+    fn set_global(&mut self, name: ValueStr, new_value: Value) -> Result<(), ErrorKind> {
         match self.globals.get_mut(&name) {
             Some((_, true)) => Err(ErrorKind::ConstGlobal(name)),
             Some((value, _)) => {
@@ -167,7 +167,7 @@ impl Interpreter {
             None => Err(ErrorKind::UndeclaredGlobal(name)),
         }
     }
-    fn declare_global(&mut self, name: InternedStr) -> Result<(), ErrorKind> {
+    fn declare_global(&mut self, name: ValueStr) -> Result<(), ErrorKind> {
         if self.globals.contains_key(&name) {
             return Err(ErrorKind::RedeclareGlobal(name));
         }
@@ -308,7 +308,7 @@ mod tests {
     use crate::{
         interpreter::{
             bytecode::{Bytecode, Load, Store},
-            string::{InternedStr, ValueStr},
+            string::ValueStr,
             value::Value,
             FnBody, FnSignature, Interpreter, UpvalueLoc,
         },
@@ -382,15 +382,15 @@ mod tests {
     }
     #[test]
     fn fibonacci_recursive() {
-        let name = InternedStr::from("fib");
+        let name = ValueStr::interned("fib");
 
         #[rustfmt::skip]
         let bytecode = [
             Bytecode::BrLe { offset: 7, src0: Load::Local(0), src1: Load::Number(1.0) },
             Bytecode::Sub { dst: Store::Local(1), src0: Load::Local(0), src1: Load::Number(1.0) },
-            Bytecode::Call { src: Load::Global(name), dst: Store::Local(1), base: 1 },
+            Bytecode::Call { src: Load::Global(name.clone()), dst: Store::Local(1), base: 1 },
             Bytecode::Sub { dst: Store::Local(2), src0: Load::Local(0), src1: Load::Number(2.0) },
-            Bytecode::Call { src: Load::Global(name), dst: Store::Local(2), base: 2 },
+            Bytecode::Call { src: Load::Global(name.clone()), dst: Store::Local(2), base: 2 },
             Bytecode::Add { dst: Store::Local(3), src0: Load::Local(1), src1: Load::Local(2) },
             Bytecode::Return(Load::Local(3)),
             Bytecode::Return(Load::Local(0)),
@@ -403,6 +403,7 @@ mod tests {
         });
         let mut interpreter = Interpreter::default();
         let function = Rc::new(interpreter.create_function(signature).unwrap());
+        interpreter.declare_global(name.clone()).unwrap();
         interpreter
             .set_global(name, Value::Function(function.clone()))
             .unwrap();
@@ -426,8 +427,8 @@ mod tests {
     }
     #[test]
     fn upvalue_test() {
-        let inc_name = InternedStr::from("inc");
-        let dec_name = InternedStr::from("dec");
+        let inc_name = ValueStr::interned("inc");
+        let dec_name = ValueStr::interned("dec");
 
         #[rustfmt::skip]
         let inc_bytecode = [
@@ -455,8 +456,8 @@ mod tests {
         let bytecode = [
             Bytecode::Move { dst: Store::Local(0), src: Load::Object(2) },
             Bytecode::Move { dst: Store::Local(1), src: Load::Number(0.0) },
-            Bytecode::StoreProperty { dst: Load::Local(0), prop: inc_name, src: Load::Function(inc_signature.clone()) },
-            Bytecode::StoreProperty { dst: Load::Local(0), prop: dec_name, src: Load::Function(dec_signature.clone()) },
+            Bytecode::StoreProperty { dst: Load::Local(0), prop: inc_name.clone(), src: Load::Function(inc_signature.clone()) },
+            Bytecode::StoreProperty { dst: Load::Local(0), prop: dec_name.clone(), src: Load::Function(dec_signature.clone()) },
             Bytecode::Return(Load::Local(0)),
         ];
         let signature = Rc::new(FnSignature {
@@ -470,12 +471,12 @@ mod tests {
         let result = interpreter.call_function_args(function, []).unwrap();
 
         let inc = result
-            .get_property(&Value::String(ValueStr::Interned(inc_name)))
+            .get_property(&Value::String(inc_name))
             .unwrap()
             .as_callable()
             .unwrap();
         let dec = result
-            .get_property(&Value::String(ValueStr::Interned(dec_name)))
+            .get_property(&Value::String(dec_name))
             .unwrap()
             .as_callable()
             .unwrap();

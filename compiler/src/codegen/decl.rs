@@ -9,7 +9,7 @@ use crate::{
     error::Result,
     interpreter::{
         bytecode::{Bytecode, Load, Store},
-        string::InternedStr,
+        string::ValueStr,
         FnBody, FnSignature,
     },
     span::{GetSpan, SpanOf},
@@ -28,11 +28,11 @@ impl Codegen {
 
         // declare params as local variables
         for p in &decl.params.1 {
-            let p_name = InternedStr::from(&p.get_str() as &str);
+            let p_name = ValueStr::interned(&p.get_str());
             self.decl_local(p_name).unwrap();
         }
         if let Some(var) = decl.variadic.as_ref() {
-            let var_name = InternedStr::from(&var.1.get_str() as &str);
+            let var_name = ValueStr::interned(&var.1.get_str());
             self.decl_local(var_name).unwrap();
         }
 
@@ -61,13 +61,16 @@ impl Codegen {
     fn gen_func_decl(&mut self, decl: &FuncDecl) -> Result<()> {
         // pre-declare the function name to allow recursion
         // function declaration is const by default
-        let name = InternedStr::from(&decl.ident.get_str() as &str);
-        let store_method = match self.decl_local(name) {
+        let name = ValueStr::interned(&decl.ident.get_str());
+        let store_method = match self.decl_local(name.clone()) {
             Some(id) => Store::Local(id),
             None => Store::Global(name),
         };
         if let Store::Global(name) = &store_method {
-            self.push_bytecode(SpanOf(decl.fn_keyword, Bytecode::GlobalDeclare(*name)));
+            self.push_bytecode(SpanOf(
+                decl.fn_keyword,
+                Bytecode::GlobalDeclare(name.clone()),
+            ));
         }
 
         let sig = self.create_func_sig(&decl.closure)?;
@@ -91,8 +94,8 @@ impl Codegen {
         Ok(())
     }
     pub(crate) fn gen_var_decl(&mut self, decl: &VarDecl) -> Result<()> {
-        let name = InternedStr::from(&decl.ident.get_str() as &str);
-        let var_store_method = match self.decl_local(name) {
+        let name = ValueStr::interned(&decl.ident.get_str());
+        let var_store_method = match self.decl_local(name.clone()) {
             Some(id) => Store::Local(id),
             None => Store::Global(name),
         };

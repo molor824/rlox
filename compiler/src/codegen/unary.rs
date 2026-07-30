@@ -4,7 +4,7 @@ use crate::{
     error::Result,
     interpreter::{
         bytecode::{Bytecode, Load, Store},
-        string::InternedStr,
+        string::ValueStr,
         LocalId,
     },
     span::{GetSpan, SpanOf},
@@ -76,7 +76,7 @@ impl Codegen {
                     Bytecode::LoadProperty {
                         dst: store_method.clone(),
                         src: load_operand,
-                        prop: InternedStr::from(prop.get_str().as_ref() as &str),
+                        prop: ValueStr::interned(&prop.get_str()),
                     },
                 ));
             }
@@ -86,7 +86,7 @@ impl Codegen {
                     Bytecode::LoadMethod {
                         dst: store_method.clone(),
                         src: load_operand,
-                        prop: InternedStr::from(prop.get_str().as_ref() as &str),
+                        prop: ValueStr::interned(&prop.get_str()),
                     },
                 ));
             }

@@ -220,7 +220,7 @@ mod tests {
         codegen::Codegen,
         interpreter::{
             bytecode::{Bytecode, Load, Store},
-            string::InternedStr,
+            string::ValueStr,
         },
     };
 
@@ -228,17 +228,17 @@ mod tests {
     fn expr_codegen_test() {
         let mut parser = Parser::new("[1, 2, *[nil, true], false]".as_bytes());
         let result = parser.next_expression(false).unwrap().unwrap();
-        let test_ident = InternedStr::from("test");
+        let test_ident = ValueStr::interned("test");
         #[rustfmt::skip]
         let expected = [
-            Bytecode::Move { dst: Store::Global(test_ident), src: Load::Array(4) },
-            Bytecode::AppendElement { dst: Load::Global(test_ident), src: Load::Number(1.0) },
-            Bytecode::AppendElement { dst: Load::Global(test_ident), src: Load::Number(2.0) },
+            Bytecode::Move { dst: Store::Global(test_ident.clone()), src: Load::Array(4) },
+            Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Number(1.0) },
+            Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Number(2.0) },
             Bytecode::Move { dst: Store::Local(0), src: Load::Array(2) },
             Bytecode::AppendElement { dst: Load::Local(0), src: Load::Nil },
             Bytecode::AppendElement { dst: Load::Local(0), src: Load::Bool(true) },
-            Bytecode::AppendElements { dst: Load::Global(test_ident), src: Load::Local(0) },
-            Bytecode::AppendElement { dst: Load::Global(test_ident), src: Load::Bool(false) },
+            Bytecode::AppendElements { dst: Load::Global(test_ident.clone()), src: Load::Local(0) },
+            Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Bool(false) },
         ];
         let mut codegen = Codegen::default();
         codegen

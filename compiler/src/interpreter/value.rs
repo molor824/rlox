@@ -1,5 +1,5 @@
 use crate::error::ErrorKind;
-use crate::interpreter::string::{CachedHash, ValueStr};
+use crate::interpreter::string::ValueStr;
 use crate::interpreter::FnSignature;
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
@@ -167,13 +167,14 @@ impl Value {
             )),
             Self::String(str) => {
                 let mut idx = 0;
-                let str = str.as_str().to_string();
                 Ok(Box::new(std::iter::from_fn(move || {
-                    let mut chars = str[idx..].chars();
+                    let mut chars = str.as_str()[idx..].chars();
                     let ch = chars.next();
                     ch.map(|ch| {
                         idx += ch.len_utf8();
-                        Value::String(ValueStr::Owned(CachedHash::from(Rc::from(ch.to_string()))))
+                        let mut buffer = [0u8; 4];
+
+                        Value::String(ValueStr::from(ch.encode_utf8(&mut buffer) as &str))
                     })
                 })))
             }
