@@ -155,7 +155,7 @@ mod tests {
             Bytecode::Invert { dst: Store::Local(1), src: Load::Local(2) },
             Bytecode::Negate { dst: Store::Local(0), src: Load::Local(1) },
         ];
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
         codegen.gen_expr(&result, None).unwrap();
         for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);

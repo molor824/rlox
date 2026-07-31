@@ -133,7 +133,7 @@ fn vector2(x, y) base({x, y}, vec2_base)
             "#
             .as_bytes(),
         );
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
 
         while let Some(stmt) = parser.next_statement().unwrap() {
             codegen.gen_statement(&stmt).unwrap();

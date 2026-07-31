@@ -240,7 +240,7 @@ mod tests {
             Bytecode::AppendElements { dst: Load::Global(test_ident.clone()), src: Load::Local(0) },
             Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Bool(false) },
         ];
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
         codegen
             .gen_expr(&result, Some(Store::Global(test_ident)))
             .unwrap();

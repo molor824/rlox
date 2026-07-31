@@ -1,4 +1,7 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
+    ast::Parser,
     interpreter::{
         bytecode::{Bytecode, Load, Store},
         string::ValueStr,
@@ -20,6 +23,7 @@ enum ScopeKind {
 }
 struct Scope {
     kind: ScopeKind,
+    base_loc: usize,
     base_local_size: LocalId, // Evaluation size recorded before the scope creation
     break_locs: Vec<usize>,   // bytecode locations at which break statements occurred
     continue_locs: Vec<usize>, // bytecode locations at which continue statements occurred
@@ -51,10 +55,11 @@ impl FnFrame {
         self.locals.push(name);
         id as LocalId
     }
-    fn push_scope(&mut self, kind: ScopeKind) {
+    fn push_scope(&mut self, kind: ScopeKind, base_loc: usize) {
         assert_eq!(self.eval_size, 0);
         self.scopes.push(Scope {
             kind,
+            base_loc,
             base_local_size: self.locals.len() as LocalId,
             break_locs: vec![],
             continue_locs: vec![],
@@ -73,12 +78,25 @@ impl FnFrame {
     }
 }
 
-#[derive(Default)]
 pub struct Codegen {
     frames: Vec<FnFrame>,
     global_frame: FnFrame,
+    source: Rc<RefCell<String>>,
 }
 impl Codegen {
+    pub fn with_source(source: Rc<RefCell<String>>) -> Self {
+        Self {
+            frames: vec![],
+            global_frame: FnFrame::default(),
+            source,
+        }
+    }
+    fn last_scope(&self) -> Option<&Scope> {
+        self.last_frame().scopes.last()
+    }
+    fn last_scope_mut(&mut self) -> Option<&mut Scope> {
+        self.last_frame_mut().scopes.last_mut()
+    }
     fn last_frame(&self) -> &FnFrame {
         self.frames.last().unwrap_or(&self.global_frame)
     }

@@ -1,18 +1,31 @@
 use crate::{
     ast::statement::Statement,
     codegen::{Codegen, Scope, ScopeKind},
-    error::Result,
-    interpreter::bytecode::Bytecode,
+    error::{Error, ErrorKind, Result},
+    interpreter::bytecode::{Bytecode, Load},
     span::{GetSpan, Span, SpanOf},
 };
 
 impl Codegen {
     fn push_scope(&mut self, kind: ScopeKind) {
+        let loc = self.bytecodes().len();
         let f = self.last_frame_mut();
-        f.push_scope(kind);
+        f.push_scope(kind, loc);
     }
     fn pop_scope(&mut self) -> Option<Scope> {
-        self.last_frame_mut().pop_scope()
+        let end_loc = self.bytecodes().len();
+        self.last_frame_mut().pop_scope().map(|scope| {
+            for break_loc in &scope.break_locs {
+                self.bytecodes_mut()[*break_loc].1 =
+                    Bytecode::Jump(end_loc as isize - *break_loc as isize);
+            }
+            let base_loc = scope.base_loc;
+            for continue_loc in &scope.continue_locs {
+                self.bytecodes_mut()[*continue_loc].1 =
+                    Bytecode::Jump(base_loc as isize - *continue_loc as isize);
+            }
+            scope
+        })
     }
     fn trunc_eval(&mut self) {
         let f = self.last_frame_mut();
@@ -102,6 +115,37 @@ impl Codegen {
                 self.pop_scope();
                 self.trunc_eval();
             }
+            Statement::Break(span) | Statement::Continue(span) => {
+                let Some(loop_idx) = self
+                    .last_frame()
+                    .scopes
+                    .iter()
+                    .rposition(|scope| matches!(scope.kind, ScopeKind::Loop))
+                else {
+                    return Err(Error {
+                        kind: match statement {
+                            Statement::Break(..) => ErrorKind::IllegalBreak,
+                            _ => ErrorKind::IllegalContinue,
+                        },
+                        span: *span,
+                        source: self.source.clone(),
+                    });
+                };
+                let id = self.bytecodes().len();
+                self.push_bytecode(SpanOf(*span, Bytecode::Nop));
+                let scope = &mut self.last_frame_mut().scopes[loop_idx];
+                match statement {
+                    Statement::Break(..) => scope.break_locs.push(id),
+                    _ => scope.continue_locs.push(id),
+                }
+            }
+            Statement::Return(expr) => {
+                let load = match &expr.1 {
+                    Some(expr) => self.gen_expr(expr, None)?,
+                    None => Load::Nil,
+                };
+                self.push_bytecode(SpanOf(expr.0, Bytecode::Return(load)));
+            }
             _ => todo!(),
         }
         Ok(())
@@ -116,16 +160,17 @@ mod tests {
     fn test_while_stmt() {
         let mut parser = Parser::new(
             r#"let i = 0
-            let sum = 0
-            while i <= 100 do
-                sum = sum + i
-                i = i + 1
-            end
-            print(sum)
+                let j = 30
+                while true do
+                    if i == j then continue end
+                    if i ** 2 == j then break end
+                    i = i + 1
+                    j = j + 20
+                end
             "#
             .as_bytes(),
         );
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
 
         while let Some(stmt) = parser.next_statement().unwrap() {
             codegen.gen_statement(&stmt).unwrap();
@@ -149,7 +194,7 @@ mod tests {
             end"#
                 .as_bytes(),
         );
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
 
         codegen
             .gen_statement(&parser.next_statement().unwrap().unwrap())

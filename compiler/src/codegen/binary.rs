@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn assign_gen_test() {
         let mut parser = Parser::new("a=b=c.d=e.f[0]=1+2".as_bytes());
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
         codegen
             .gen_expr(
                 &parser.next_expression(false).unwrap().unwrap(),
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn binary_gen_test() {
         let mut parser = Parser::new("1!=0 + 2 * 0.2 or 3 <= 3 and 3>2".as_bytes());
-        let mut codegen = Codegen::default();
+        let mut codegen = Codegen::with_source(parser.source());
 
         #[rustfmt::skip]
         let expected = [

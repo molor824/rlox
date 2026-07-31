@@ -88,6 +88,10 @@ pub enum ErrorKind {
     InvalidUpvalueAccess,
     #[error("Attempted to access local value in global scope")]
     LocalAccessInGlobal,
+    #[error("Break statement outside of while/for loop")]
+    IllegalBreak,
+    #[error("Continue statement outside of while/for loop")]
+    IllegalContinue,
 }
 
 #[derive(thiserror::Error)]

@@ -25,6 +25,11 @@ pub struct Parser<R> {
     buffer: Rc<RefCell<String>>,
     offset: usize,
 }
+impl<R> Parser<R> {
+    pub fn source(&self) -> Rc<RefCell<String>> {
+        self.buffer.clone()
+    }
+}
 impl<R> Clone for Parser<R> {
     fn clone(&self) -> Self {
         Self {

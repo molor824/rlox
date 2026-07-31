@@ -8,7 +8,7 @@ use std::{
 
 use rustc_hash::{FxHashMap, FxHasher};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ValueStr(u64, Rc<str>);
 impl ValueStr {
     pub fn interned(string: &str) -> ValueStr {
@@ -16,6 +16,11 @@ impl ValueStr {
     }
     pub fn as_str(&self) -> &str {
         &self.1
+    }
+}
+impl fmt::Debug for ValueStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.1)
     }
 }
 impl From<Rc<str>> for ValueStr {
