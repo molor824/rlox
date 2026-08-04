@@ -1,7 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ast::Parser,
     interpreter::{
         bytecode::{Bytecode, Load, Store},
         string::ValueStr,
@@ -90,12 +89,6 @@ impl Codegen {
             global_frame: FnFrame::default(),
             source,
         }
-    }
-    fn last_scope(&self) -> Option<&Scope> {
-        self.last_frame().scopes.last()
-    }
-    fn last_scope_mut(&mut self) -> Option<&mut Scope> {
-        self.last_frame_mut().scopes.last_mut()
     }
     fn last_frame(&self) -> &FnFrame {
         self.frames.last().unwrap_or(&self.global_frame)
@@ -193,6 +186,40 @@ impl Codegen {
                 }
             }
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ast::Parser, codegen::Codegen};
+
+    #[test]
+    fn test_codegen() {
+        let mut parser = Parser::new(
+            r#"
+            fn fib(n) do
+                let a = 0
+                let b = 1
+                let i = 0
+                while i < n do
+                    let c = a + b
+                    a = b
+                    b = c
+                    i = i + 1
+                end
+                return i
+            end
+            "#
+            .as_bytes(),
+        );
+        let mut codegen = Codegen::with_source(parser.source());
+        codegen
+            .gen_statement(&parser.next_statement().unwrap().unwrap())
+            .unwrap();
+
+        for bc in codegen.bytecodes() {
+            println!("{:?}", bc.1);
         }
     }
 }
