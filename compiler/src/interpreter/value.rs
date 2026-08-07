@@ -72,28 +72,52 @@ pub struct Function {
 
 #[derive(Debug)]
 pub struct Object {
-    map: FxHashMap<Value, Value>,
-    super_obj: Option<Rc<RefCell<Object>>>,
+    pub map: FxHashMap<Value, Value>,
+    base_obj: Option<Rc<RefCell<Object>>>,
 }
 impl Object {
+    pub fn new(map: FxHashMap<Value, Value>) -> Result<Self, ErrorKind> {
+        for key in map.keys() {
+            Self::validate_key(key)?;
+        }
+        Ok(Self {
+            map,
+            base_obj: None,
+        })
+    }
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             map: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
-            super_obj: None,
+            base_obj: None,
         }
     }
     pub fn get_property(&self, key: &Value) -> Result<Value, ErrorKind> {
+        Self::validate_key(key)?;
         if let Some(value) = self.map.get(key) {
             Ok(value.clone())
-        } else if let Some(super_obj) = &self.super_obj {
+        } else if let Some(super_obj) = &self.base_obj {
             super_obj.borrow().get_property(key)
         } else {
             Ok(Value::Nil)
         }
     }
     pub fn set_property(&mut self, key: Value, new_value: Value) -> Result<(), ErrorKind> {
+        Self::validate_key(&key)?;
+        if matches!(new_value, Value::Nil) {
+            self.map.remove(&key);
+            return Ok(());
+        }
         self.map.insert(key, new_value);
         Ok(())
+    }
+    fn validate_key(key: &Value) -> Result<(), ErrorKind> {
+        match key {
+            Value::Nil => Err(ErrorKind::IllegalPropertyAccess),
+            Value::Number(n) if n.is_nan() || n.is_infinite() => {
+                Err(ErrorKind::IllegalPropertyAccess)
+            }
+            _ => Ok(()),
+        }
     }
 }
 

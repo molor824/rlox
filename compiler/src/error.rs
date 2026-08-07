@@ -84,6 +84,8 @@ pub enum ErrorKind {
     InvalidArrayIndex,
     #[error("Attempted to access property of value whose type is not object or array")]
     InvalidPropertyAccess,
+    #[error("Attempted to access property of nil, NaN, or infinite values")]
+    IllegalPropertyAccess,
     #[error("Attempted to access non-existent upvalue")]
     InvalidUpvalueAccess,
     #[error("Attempted to access local value in global scope")]
@@ -92,6 +94,8 @@ pub enum ErrorKind {
     IllegalBreak,
     #[error("Continue statement outside of while/for loop")]
     IllegalContinue,
+    #[error("{0}")]
+    RuntimeError(String),
 }
 
 #[derive(thiserror::Error)]

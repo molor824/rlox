@@ -9,6 +9,7 @@ use crate::interpreter::{bytecode::Bytecode, value::Function, value::Value};
 use crate::span::SpanOf;
 use rustc_hash::FxHashMap;
 
+mod builtin;
 pub mod bytecode;
 pub mod string;
 pub mod value;
@@ -80,10 +81,26 @@ pub struct Interpreter {
 impl Default for Interpreter {
     fn default() -> Self {
         const STACK_SIZE: usize = 0x10000;
+        let globals = builtin::GLOBALS
+            .iter()
+            .cloned()
+            .map(|(name, sig)| {
+                (
+                    name,
+                    (
+                        Value::Function(Rc::new(Function {
+                            signature: sig,
+                            upvalues: vec![],
+                        })),
+                        true,
+                    ),
+                )
+            })
+            .collect::<FxHashMap<_, _>>();
         Self {
             memory: Vec::with_capacity(STACK_SIZE),
             current_frame: None,
-            globals: FxHashMap::default(),
+            globals,
         }
     }
 }
