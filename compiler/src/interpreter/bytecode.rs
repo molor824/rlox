@@ -1,93 +1,50 @@
 use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
 use crate::interpreter::value::{Object, Value};
-use crate::interpreter::{FnSignature, Interpreter, LocalId};
-use std::cell::RefCell;
+use crate::interpreter::{FnSignature, Interpreter};
 use std::rc::Rc;
 
-#[derive(Debug, Clone)]
-pub enum Load {
-    Local(LocalId),
-    LocalIndirect(LocalId),
-    Upvalue(LocalId),
-    Global(ValueStr),
-    Nil,
-    Bool(bool),
-    Number(f64),
-    String(ValueStr),
-    Function(Rc<FnSignature>),
-    Array(usize),
-    Object(usize),
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum BinaryOps {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Pow,
+    Shl,
+    Shr,
+    Sha,
+    BitAnd,
+    BitOr,
+    BitXor,
+    SetEq,
+    SetNe,
+    SetLt,
+    SetLe,
+    SetGt,
+    SetGe,
 }
-impl PartialEq for Load {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            Self::Local(id) => matches!(other, Self::Local(id2) if id == id2),
-            Self::LocalIndirect(id) => matches!(other, Self::LocalIndirect(id2) if id == id2),
-            Self::Upvalue(id) => matches!(other, Self::Upvalue(id2) if id == id2),
-            Self::Global(id) => matches!(other, Self::Global(id2) if id == id2),
-            Self::Nil => matches!(other, Self::Nil),
-            Self::Bool(b) => matches!(other, Self::Bool(b2) if b == b2),
-            Self::Number(n) => matches!(other, Self::Number(n2) if n == n2),
-            Self::String(s) => matches!(other, Self::String(s2) if s == s2),
-            Self::Function(f) => matches!(other, Self::Function(f2) if Rc::ptr_eq(f, f2)),
-            Self::Array(_) => matches!(other, Self::Array(_)),
-            Self::Object(_) => matches!(other, Self::Object(_)),
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOps {
+    Negate,
+    Swap,
+    SetTrue,
+    SetFalse,
 }
-impl Load {
-    fn load(&self, interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
-        Ok(match self {
-            Self::Local(id) => interpreter.get_local(*id),
-            Self::LocalIndirect(id) => {
-                interpreter.get_local(interpreter.get_local(*id).as_number()? as LocalId)
-            }
-            Self::Upvalue(id) => interpreter.get_upvalue(*id)?,
-            Self::Global(id) => interpreter.get_global(id.clone()),
-            Self::Nil => Value::Nil,
-            Self::Bool(b) => Value::Bool(*b),
-            Self::Number(n) => Value::Number(*n),
-            Self::String(s) => Value::String(s.clone()),
-            Self::Function(s) => Value::Function(Rc::new(interpreter.create_function(s.clone())?)),
-            Self::Array(c) => Value::Array(Rc::new(RefCell::new(Vec::with_capacity(*c)))),
-            Self::Object(c) => Value::Object(Rc::new(RefCell::new(Object::with_capacity(*c)))),
-        })
-    }
-}
-#[derive(Debug, Clone, PartialEq)]
-pub enum Store {
-    Local(LocalId),
-    LocalIndirect(LocalId),
-    Global(ValueStr),
-    Upvalue(LocalId),
-    Nil,
-}
-impl Store {
-    pub fn to_load(&self) -> Load {
-        match self {
-            Self::Local(id) => Load::Local(*id),
-            Self::LocalIndirect(id) => Load::LocalIndirect(*id),
-            Self::Global(id) => Load::Global(id.clone()),
-            Self::Upvalue(id) => Load::Upvalue(*id),
-            Self::Nil => Load::Nil,
-        }
-    }
-    fn store(&self, interpreter: &mut Interpreter, new_value: Value) -> Result<(), ErrorKind> {
-        match self {
-            Self::Local(id) => interpreter.set_local(*id, new_value),
-            Self::LocalIndirect(id) => interpreter.set_local(
-                interpreter.get_local(*id).as_number()? as LocalId,
-                new_value,
-            ),
-            Self::Global(id) => interpreter.set_global(id.clone(), new_value),
-            Self::Upvalue(id) => interpreter.set_upvalue(*id, new_value),
-            Self::Nil => Ok(()),
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchCond {
+    False,
+    True,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[rustfmt::skip]
 /// Bytecode for the language. It assumes a linear memory made up of cell that can accept any value.
 /// Constants, and globals have their own unique IDs so from the codegen perspective, global and constant identifiers needs to be interned before being used.
@@ -96,75 +53,46 @@ impl Store {
 /// The memory automatically grows if the memory index is past the stack pointer.
 pub enum Bytecode {
     Nop,
-
+    Dup, // s0 -> s0, s0
     // Binary operations
-    Add { dst: Store, src0: Load, src1: Load },
-    Sub { dst: Store, src0: Load, src1: Load },
-    Mul { dst: Store, src0: Load, src1: Load },
-    Div { dst: Store, src0: Load, src1: Load },
-    Rem { dst: Store, src0: Load, src1: Load },
-    Pow { dst: Store, src0: Load, src1: Load },
-    Shl { dst: Store, src0: Load, src1: Load },
-    Shr { dst: Store, src0: Load, src1: Load },
-    Sha { dst: Store, src0: Load, src1: Load },
-    And { dst: Store, src0: Load, src1: Load },
-    Or { dst: Store, src0: Load, src1: Load },
-    Xor { dst: Store, src0: Load, src1: Load },
-
-    SetEq { dst: Store, src0: Load, src1: Load },
-    SetNe { dst: Store, src0: Load, src1: Load },
-    SetLt { dst: Store, src0: Load, src1: Load },
-    SetGt { dst: Store, src0: Load, src1: Load },
-    SetLe { dst: Store, src0: Load, src1: Load },
-    SetGe { dst: Store, src0: Load, src1: Load },
-
+    Binary(BinaryOps), // s0, s1 -> <BINARY> s0 s1
     // Unary operations
-    Negate { dst: Store, src: Load },
-    Invert { dst: Store, src: Load },
-    SetTrue { dst: Store, src: Load },
-    SetFalse { dst: Store, src: Load },
-
+    Unary(UnaryOps), // s0 -> <UNARY> s0
     // Branching operations
-    BrEq { offset: isize, src0: Load, src1: Load },
-    BrNe { offset: isize, src0: Load, src1: Load },
-    BrLt { offset: isize, src0: Load, src1: Load },
-    BrGt { offset: isize, src0: Load, src1: Load },
-    BrLe { offset: isize, src0: Load, src1: Load },
-    BrGe { offset: isize, src0: Load, src1: Load },
-    BrTrue { offset: isize, src: Load },
-    BrFalse { offset: isize, src: Load },
-
+    Branch(BranchCond, isize), // if BranchCond::True || BranchCond::False then s0 -> <BR_IF> .0 s0; else s0, s1 -> <BR_IF> .0 s0 s1;
     // Global memory
-    GlobalDeclare(ValueStr), // declare global variable
-    GlobalReadOnly(ValueStr), // make GLOBAL[.0] read-only
-
-    // Memory
-    Move { dst: Store, src: Load }, // [.0] = [.1]
-    Truncate(usize), // truncates till .0
-
+    GlobalDeclare(ValueStr), // declare global
+    GlobalReadOnly(ValueStr), // make global readonly
+    GlobalLoad(ValueStr), // () -> <GET_GLOBAL> .0
+    GlobalStore(ValueStr), // s0 -> <SET_GLOBAL> .0 s0;
+    // Local memory
+    Truncate(usize), // truncate till current length
+    LocalLoad(usize), // () -> <LOAD_LOCAL> .0
+    LocalStore(usize), // s0 -> <STORE_LOCAL> .0 s0;
+    // Upvalue
+    UpvalueLoad(usize), // () -> <LOAD_UPVALUE> .0
+    UpvalueStore(usize), // s0 -> <STORE_UPVALUE> .0 s0;
     // Property
-    LoadProperty { dst: Store, src: Load, prop: ValueStr }, // [.0] = [.1].(.2) --- Equivalent to a.b
-    LoadMethod { dst: Store, src: Load, prop: ValueStr }, // [.0] = [.1]:(.2) --- Equivalent to a:b, returns closure that internally calls `a.b(a, ...)`
-    StoreProperty { dst: Load, src: Load, prop: ValueStr }, // [.0].1 = [.2] --- Equivalent to a.b = c
-    LoadPropertyIndirect { dst: Store, src: Load, prop: Load }, // [.0] = [.1][[.2]] --- Equivalent to a[b]
-    StorePropertyIndirect { dst: Load, src: Load, prop: Load }, // [.0][[.1]] = [.2] --- Equivalent to a[b] = c
-
+    PropertyLoad(ValueStr), // obj -> obj[.0]
+    PropertyLoadIndirect, // obj, key -> obj[key]
+    PropertyStore(ValueStr), // obj, val -> obj[.0] = val;
+    PropertyStoreIndirect, // obj, key, val -> obj[key] = val;
+    MethodLoad(ValueStr), // obj -> (\... -> obj[key](obj[key], ...))
     // Array initialization
-    AppendElement { dst: Load, src: Load },
-    AppendElements { dst: Load, src: Load }, // elems should be array or any iterator
-
+    StackToArray, // s0, s1, s2, ... -> [s0, s1, s2, ...]
     // Object initialization
-    StoreProperties { dst: Load, src: Load }, // src should be object or any iterator
-
+    StackToObj, // k0, v0, k1, v1, ... -> {k0: v0, k1: v1, ...}
+    LoadNil,
+    LoadBool(bool),
+    LoadNum(f64),
+    LoadFn(Rc<FnSignature>),
+    LoadStr(ValueStr),
     // Jumping
-    Jump(isize), // IP += .0
-
+    Jump(isize), // pc += .0
     // Function call
-    Call { src: Load, base: LocalId, dst: Store },
-    CallArray { src: Load, args: Load, dst: Store },
-
+    Call, // func, p0, p1, p2, ... -> func(p0, p1, p2, ...)
     // Return
-    Return(Load),
+    Return, // v0 -> return(v0);
 }
 impl Bytecode {
     // None -> return

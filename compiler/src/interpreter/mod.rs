@@ -14,8 +14,6 @@ pub mod bytecode;
 pub mod string;
 pub mod value;
 
-pub type LocalId = u32;
-
 struct FunctionFrame {
     base_pointer: usize,
     function: Rc<Function>,
