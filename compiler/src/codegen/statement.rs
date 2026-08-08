@@ -14,7 +14,7 @@ impl Codegen {
     }
     fn pop_scope(&mut self) -> Option<Scope> {
         let end_loc = self.bytecodes().len();
-        self.last_frame_mut().pop_scope().map(|scope| {
+        self.last_frame_mut().pop_scope().inspect(|scope| {
             for break_loc in &scope.break_locs {
                 self.bytecodes_mut()[*break_loc].1 =
                     Bytecode::Jump(end_loc as isize - *break_loc as isize);
@@ -24,7 +24,6 @@ impl Codegen {
                 self.bytecodes_mut()[*continue_loc].1 =
                     Bytecode::Jump(base_loc as isize - *continue_loc as isize);
             }
-            scope
         })
     }
     fn trunc_eval(&mut self) {

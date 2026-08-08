@@ -178,7 +178,7 @@ impl Number {
             value *= self.radix as f64;
             value += (&integer % self.radix)
                 .to_u32_digits()
-                .get(0)
+                .first()
                 .copied()
                 .unwrap_or(0) as f64;
             integer /= self.radix;

@@ -66,10 +66,9 @@ impl FnFrame {
     }
     fn pop_scope(&mut self) -> Option<Scope> {
         assert_eq!(self.eval_size, 0);
-        self.scopes.pop().map(|s| {
+        self.scopes.pop().inspect(|s| {
             self.locals.truncate(s.base_local_size as usize);
             self.eval_size = s.base_local_size - self.locals.len() as LocalId;
-            s
         })
     }
     fn total_size(&self) -> LocalId {

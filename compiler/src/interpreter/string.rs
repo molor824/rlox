@@ -6,28 +6,39 @@ use std::{
     rc::Rc,
 };
 
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxHashSet, FxHasher};
 
 #[derive(Clone)]
-pub struct ValueStr(u64, Rc<str>);
+pub struct ValueStr {
+    hash: u64,
+    str: Rc<str>,
+    interned: bool,
+}
 impl ValueStr {
-    pub fn interned(string: &str) -> ValueStr {
-        INTERNER.with(|interner| interner.borrow_mut().add_str(string))
+    fn new(str: Rc<str>, interned: bool) -> Self {
+        let mut hasher = FxHasher::default();
+        str.hash(&mut hasher);
+        Self {
+            hash: hasher.finish(),
+            str,
+            interned,
+        }
+    }
+    pub fn interned(string: &str) -> Self {
+        Self::new(INTERNER.with(|i| i.borrow_mut().add_str(string)), true)
     }
     pub fn as_str(&self) -> &str {
-        &self.1
+        &self.str
     }
 }
 impl fmt::Debug for ValueStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.1)
+        write!(f, "{:?}", self.str)
     }
 }
 impl From<Rc<str>> for ValueStr {
     fn from(value: Rc<str>) -> Self {
-        let mut hasher = FxHasher::default();
-        value.hash(&mut hasher);
-        Self(hasher.finish(), value)
+        Self::new(value, false)
     }
 }
 impl From<&str> for ValueStr {
@@ -37,13 +48,16 @@ impl From<&str> for ValueStr {
 }
 impl PartialEq for ValueStr {
     fn eq(&self, other: &Self) -> bool {
-        self.1 == other.1
+        if self.interned && other.interned {
+            return Rc::ptr_eq(&self.str, &other.str);
+        }
+        self.str == other.str
     }
 }
 impl Eq for ValueStr {}
 impl Hash for ValueStr {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
+        self.hash.hash(state);
     }
 }
 impl Add for &ValueStr {
@@ -57,22 +71,22 @@ impl Add for &ValueStr {
 }
 impl fmt::Display for ValueStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.1)
+        write!(f, "{}", self.str)
     }
 }
 
 #[derive(Default)]
 pub struct StrInterner {
-    strings: FxHashMap<Rc<str>, ValueStr>,
+    strings: FxHashSet<Rc<str>>,
 }
 impl StrInterner {
-    pub fn add_str(&mut self, str: &str) -> ValueStr {
+    pub fn add_str(&mut self, str: &str) -> Rc<str> {
         match self.strings.get(str) {
             Some(str) => str.clone(),
             None => {
-                let val_str = ValueStr::from(str);
-                self.strings.insert(val_str.1.clone(), val_str.clone());
-                val_str
+                let rc_str = Rc::<str>::from(str);
+                self.strings.insert(rc_str.clone());
+                rc_str
             }
         }
     }

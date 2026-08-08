@@ -84,12 +84,17 @@ impl Default for Interpreter {
         let globals = builtin::GLOBALS
             .iter()
             .cloned()
-            .map(|(name, sig)| {
+            .map(|(name, arity, variadic, body)| {
                 (
-                    name,
+                    ValueStr::interned(name),
                     (
                         Value::Function(Rc::new(Function {
-                            signature: sig,
+                            signature: Rc::new(FnSignature {
+                                arity,
+                                variadic,
+                                upvalues: vec![],
+                                body: FnBody::Builtin(Box::new(body)),
+                            }),
                             upvalues: vec![],
                         })),
                         true,

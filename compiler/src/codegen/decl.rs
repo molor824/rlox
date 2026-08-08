@@ -18,8 +18,8 @@ use crate::{
 impl Codegen {
     pub fn gen_decl(&mut self, declaration: &Declaration) -> Result<()> {
         match declaration {
-            Declaration::VarDecl(decl) => self.gen_var_decl(&decl),
-            Declaration::FuncDecl(decl) => self.gen_func_decl(&decl),
+            Declaration::VarDecl(decl) => self.gen_var_decl(decl),
+            Declaration::FuncDecl(decl) => self.gen_func_decl(decl),
             Declaration::Expression(expr) => self.gen_expr(expr, Some(Store::Nil)).map(|_| ()),
         }
     }

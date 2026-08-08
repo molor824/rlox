@@ -1,11 +1,10 @@
-use std::{cell::RefCell, rc::Rc, sync::LazyLock};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::ErrorKind,
     interpreter::{
-        string::ValueStr,
         value::{Object, Value},
-        FnBody, FnSignature, Interpreter,
+        Interpreter,
     },
 };
 
@@ -58,30 +57,15 @@ pub fn length(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     }
 }
 
-pub const GLOBALS: LazyLock<Vec<(ValueStr, Rc<FnSignature>)>> = LazyLock::new(|| {
-    [
-        (
-            "print",
-            0,
-            true,
-            print as fn(&mut Interpreter) -> Result<Value, ErrorKind>,
-        ),
-        ("println", 0, true, println),
-        ("array", 1, false, array),
-        ("object", 1, false, object),
-        ("len", 1, false, length),
-    ]
-    .into_iter()
-    .map(|(name, arity, variadic, fun)| {
-        (
-            ValueStr::interned(name),
-            Rc::new(FnSignature {
-                arity: arity,
-                variadic: variadic,
-                upvalues: vec![],
-                body: FnBody::Builtin(Box::new(fun)),
-            }),
-        )
-    })
-    .collect()
-});
+pub const GLOBALS: [(
+    &str,
+    usize,
+    bool,
+    fn(&mut Interpreter) -> Result<Value, ErrorKind>,
+); 5] = [
+    ("print", 0, true, print),
+    ("println", 0, true, println),
+    ("array", 1, false, array),
+    ("object", 1, false, object),
+    ("len", 1, false, length),
+];
