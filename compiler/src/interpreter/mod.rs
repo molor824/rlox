@@ -150,7 +150,7 @@ impl Interpreter {
         let fun = self
             .current_frame
             .as_ref()
-            .ok_or(ErrorKind::LocalAccessInGlobal)?
+            .ok_or(ErrorKind::UpvalueAccessInGlobal)?
             .function
             .as_ref();
         Ok(fun
@@ -163,7 +163,7 @@ impl Interpreter {
         let fun = self
             .current_frame
             .as_ref()
-            .ok_or(ErrorKind::LocalAccessInGlobal)?
+            .ok_or(ErrorKind::UpvalueAccessInGlobal)?
             .function
             .as_ref();
         if let Some(v) = fun.upvalues.get(id as usize) {
@@ -220,7 +220,7 @@ impl Interpreter {
             let current_frame = interpreter
                 .current_frame
                 .as_ref()
-                .ok_or(ErrorKind::LocalAccessInGlobal)?;
+                .ok_or(ErrorKind::UpvalueAccessInGlobal)?;
             let arity = current_frame.function.signature.required_arity();
             let base_pointer = current_frame.base_pointer;
 
@@ -235,7 +235,7 @@ impl Interpreter {
             upvalues: vec![],
         }))
     }
-    fn create_function(&mut self, signature: Rc<FnSignature>) -> Result<Function, ErrorKind> {
+    pub fn create_function(&mut self, signature: Rc<FnSignature>) -> Result<Function, ErrorKind> {
         let upvalues = signature
             .upvalues
             .iter()
@@ -243,7 +243,7 @@ impl Interpreter {
                 UpvalueLoc::Shared(id) => Ok(self
                     .current_frame
                     .as_ref()
-                    .ok_or(ErrorKind::LocalAccessInGlobal)?
+                    .ok_or(ErrorKind::UpvalueAccessInGlobal)?
                     .function
                     .upvalues[*id as usize]
                     .clone()),
@@ -271,7 +271,10 @@ impl Interpreter {
             FnBody::Bytecode(bytecodes) => {
                 let mut index = 0;
                 loop {
-                    match bytecodes[index].1.interpret(self, index)? {
+                    let Some(bc) = bytecodes.get(index) else {
+                        break Value::Nil;
+                    };
+                    match bc.1.interpret(self, index)? {
                         Ok(next) => index = next,
                         Err(ret) => break ret,
                     }
@@ -286,7 +289,7 @@ impl Interpreter {
     }
     fn call_function(&mut self, function: Rc<Function>, base: LocalId) -> Result<Value, ErrorKind> {
         let base_pointer = self.base_pointer() + base as usize;
-        let arity = self.memory.len() - base_pointer;
+        let arity = self.memory.len().saturating_sub(base_pointer);
         let signature = function.signature.as_ref();
         if signature.variadic {
             // additional arguments are all combined into list

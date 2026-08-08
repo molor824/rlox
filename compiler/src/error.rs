@@ -88,8 +88,8 @@ pub enum ErrorKind {
     IllegalPropertyAccess,
     #[error("Attempted to access non-existent upvalue")]
     InvalidUpvalueAccess,
-    #[error("Attempted to access local value in global scope")]
-    LocalAccessInGlobal,
+    #[error("Attempted to access upvalue in global scope")]
+    UpvalueAccessInGlobal,
     #[error("Break statement outside of while/for loop")]
     IllegalBreak,
     #[error("Continue statement outside of while/for loop")]

@@ -23,6 +23,7 @@ impl Codegen {
 
         match operator {
             PostfixOperator::Call(args) => {
+                let span = args.0;
                 let regular_args = args
                     .1
                     .iter()
@@ -44,10 +45,15 @@ impl Codegen {
                     }
                     Some(args) => {
                         let base = self.total_size();
-                        for arg in args {
+                        for arg in &args {
                             let local = self.push_eval_id();
                             self.gen_expr(arg, Some(Store::Local(local)))?;
                         }
+                        // Truncate to prevent call from accidentally passing more than needed parameters
+                        self.push_bytecode(SpanOf(
+                            span,
+                            Bytecode::Truncate(base as usize + args.len()),
+                        ));
 
                         Bytecode::Call {
                             src: load_operand,

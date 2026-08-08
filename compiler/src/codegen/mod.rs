@@ -4,7 +4,7 @@ use crate::{
     interpreter::{
         bytecode::{Bytecode, Load, Store},
         string::ValueStr,
-        LocalId, UpvalueLoc,
+        FnBody, FnSignature, LocalId, UpvalueLoc,
     },
     span::SpanOf,
 };
@@ -185,6 +185,16 @@ impl Codegen {
                 }
             }
             None
+        }
+    }
+    pub fn pop_init_sig(self) -> FnSignature {
+        assert!(self.frames.is_empty(), "Incomplete function frames exist!");
+        let frame = self.global_frame;
+        FnSignature {
+            arity: 0,
+            variadic: false,
+            upvalues: vec![],
+            body: FnBody::Bytecode(frame.bytecodes),
         }
     }
 }

@@ -1,6 +1,7 @@
 use std::cell::Ref;
 
 use num_bigint::BigUint;
+use num_traits::ToPrimitive;
 
 use crate::{
     ast::{declaration::FunctionBody, *},
@@ -172,17 +173,7 @@ pub struct Number {
 }
 impl Number {
     pub fn to_f64(&self) -> f64 {
-        let mut integer = self.integer.clone();
-        let mut value = 0.0;
-        while integer != BigUint::ZERO {
-            value *= self.radix as f64;
-            value += (&integer % self.radix)
-                .to_u32_digits()
-                .first()
-                .copied()
-                .unwrap_or(0) as f64;
-            integer /= self.radix;
-        }
+        let mut value = self.integer.to_f64().unwrap_or(f64::INFINITY);
         let exponent = self.exponent.unwrap_or(0);
         if exponent < 0 {
             for _ in exponent..0 {
@@ -190,7 +181,7 @@ impl Number {
             }
         } else {
             for _ in 0..exponent {
-                value /= self.radix as f64;
+                value *= self.radix as f64;
             }
         }
         value
