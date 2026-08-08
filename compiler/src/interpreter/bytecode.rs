@@ -351,7 +351,7 @@ impl Bytecode {
                 let value = src.load(interpreter)?;
                 dst.store(interpreter, value)?;
             }
-            Bytecode::Truncate(new_len) => interpreter.truncate(*new_len)?,
+            Bytecode::Truncate(new_len) => interpreter.truncate(*new_len),
             Bytecode::Return(src) => return src.load(interpreter).map(Err),
             Bytecode::Call { src, base, dst } => {
                 let function = src.load(interpreter)?.as_callable()?;

@@ -196,12 +196,9 @@ impl Interpreter {
         self.globals.insert(name, (Value::Nil, false));
         Ok(())
     }
-    fn truncate(&mut self, new_len: usize) -> Result<(), ErrorKind> {
-        if new_len < self.base_pointer() {
-            return Err(ErrorKind::StackUnderflow);
-        }
-        self.memory.truncate(new_len);
-        Ok(())
+    fn truncate(&mut self, new_len: usize) {
+        let base = self.base_pointer();
+        self.memory.truncate(new_len + base);
     }
     fn base_pointer(&self) -> usize {
         self.current_frame
@@ -282,34 +279,25 @@ impl Interpreter {
             }
         };
 
-        self.truncate(base_pointer)?;
+        self.truncate(0);
         self.current_frame = old_frame;
 
         Ok(return_value)
     }
     fn call_function(&mut self, function: Rc<Function>, base: LocalId) -> Result<Value, ErrorKind> {
         let base_pointer = self.base_pointer() + base as usize;
-        let arity = self.memory.len().saturating_sub(base_pointer);
+        let arity = self.memory.len() - base_pointer;
         let signature = function.signature.as_ref();
         if signature.variadic {
             // additional arguments are all combined into list
             let array = (signature.arity..arity)
-                .map(|i| match &self.memory[base_pointer + i] {
-                    // Upvalue is generally not allowed as function argument, but if it does happen, just clone the value
-                    Cell::Upvalue(shared) => shared.borrow().clone(),
-                    Cell::Value(value) => value.clone(),
-                })
+                .map(|i| self.get_local(i as LocalId + base))
                 .collect::<Vec<_>>();
             let variadic = Value::Array(Rc::new(RefCell::new(array)));
-            let new_index = base_pointer + signature.arity;
-            if new_index >= self.memory.len() {
-                self.memory.resize_with(new_index + 1, Cell::default);
-            }
-            self.memory[new_index] = Cell::Value(variadic);
+            self.set_local(signature.arity as LocalId + base, variadic)?;
         }
         // Truncate until it's no longer past the expected arity
-        self.memory
-            .truncate(base_pointer + signature.required_arity());
+        self.truncate(base as usize + signature.required_arity());
 
         self.call_function_unchecked(function, base_pointer)
     }

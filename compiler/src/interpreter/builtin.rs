@@ -32,12 +32,12 @@ pub fn array(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
 }
 pub fn object(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let iter = interpreter.get_local(0).try_iterator()?.map(|value| {
-        value.try_array().map(|array| {
-            (
-                array.borrow().get(0).cloned().unwrap_or_default(),
-                array.borrow().get(1).cloned().unwrap_or_default(),
-            )
-        })
+        let arr = value.try_array()?;
+        let arr = arr.borrow();
+        Ok((
+            arr.get(0).cloned().unwrap_or_default().try_str()?,
+            arr.get(1).cloned().unwrap_or_default(),
+        )) as Result<_, ErrorKind>
     });
     let obj = Value::Object(Rc::new(RefCell::new(Object::new(
         iter.collect::<Result<_, _>>()?,
@@ -56,16 +56,40 @@ pub fn length(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
         ))),
     }
 }
+pub fn set_base_obj(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    let src = interpreter.get_local(0).try_object()?;
+    let base = interpreter.get_local(1).try_object()?;
+    src.borrow_mut().base_obj = Some(base);
+    Ok(Value::Object(src))
+}
+pub fn get_base_obj(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    interpreter
+        .get_local(0)
+        .try_object()
+        .map(|obj| match obj.borrow().base_obj.clone() {
+            Some(base) => Value::Object(base),
+            None => Value::Nil,
+        })
+}
+pub fn sqrt(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    interpreter
+        .get_local(0)
+        .try_num()
+        .map(|n| Value::Number(n.sqrt()))
+}
 
 pub const GLOBALS: [(
     &str,
     usize,
     bool,
     fn(&mut Interpreter) -> Result<Value, ErrorKind>,
-); 5] = [
+); 8] = [
     ("print", 0, true, print),
     ("println", 0, true, println),
     ("array", 1, false, array),
     ("object", 1, false, object),
     ("len", 1, false, length),
+    ("setbase", 2, false, set_base_obj),
+    ("getbase", 1, false, get_base_obj),
+    ("sqrt", 1, false, sqrt),
 ];

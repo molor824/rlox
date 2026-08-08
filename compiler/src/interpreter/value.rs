@@ -72,14 +72,11 @@ pub struct Function {
 
 #[derive(Debug)]
 pub struct Object {
-    pub map: FxHashMap<Value, Value>,
-    base_obj: Option<Rc<RefCell<Object>>>,
+    pub map: FxHashMap<ValueStr, Value>,
+    pub base_obj: Option<Rc<RefCell<Object>>>,
 }
 impl Object {
-    pub fn new(map: FxHashMap<Value, Value>) -> Result<Self, ErrorKind> {
-        for key in map.keys() {
-            Self::validate_key(key)?;
-        }
+    pub fn new(map: FxHashMap<ValueStr, Value>) -> Result<Self, ErrorKind> {
         Ok(Self {
             map,
             base_obj: None,
@@ -91,8 +88,7 @@ impl Object {
             base_obj: None,
         }
     }
-    pub fn get_property(&self, key: &Value) -> Result<Value, ErrorKind> {
-        Self::validate_key(key)?;
+    pub fn get_property(&self, key: &ValueStr) -> Result<Value, ErrorKind> {
         if let Some(value) = self.map.get(key) {
             Ok(value.clone())
         } else if let Some(super_obj) = &self.base_obj {
@@ -101,23 +97,13 @@ impl Object {
             Ok(Value::Nil)
         }
     }
-    pub fn set_property(&mut self, key: Value, new_value: Value) -> Result<(), ErrorKind> {
-        Self::validate_key(&key)?;
+    pub fn set_property(&mut self, key: ValueStr, new_value: Value) -> Result<(), ErrorKind> {
         if matches!(new_value, Value::Nil) {
             self.map.remove(&key);
             return Ok(());
         }
         self.map.insert(key, new_value);
         Ok(())
-    }
-    fn validate_key(key: &Value) -> Result<(), ErrorKind> {
-        match key {
-            Value::Nil => Err(ErrorKind::IllegalPropertyAccess),
-            Value::Number(n) if n.is_nan() || n.is_infinite() => {
-                Err(ErrorKind::IllegalPropertyAccess)
-            }
-            _ => Ok(()),
-        }
     }
 }
 
@@ -166,6 +152,12 @@ impl Value {
             Self::Function(_) => "function",
         }
     }
+    pub fn try_num(self) -> Result<f64, ErrorKind> {
+        match self {
+            Self::Number(n) => Ok(n),
+            v => Err(ErrorKind::InvalidType(v.type_str(), "number")),
+        }
+    }
     pub fn try_array(self) -> Result<Rc<RefCell<Vec<Value>>>, ErrorKind> {
         match self {
             Self::Array(arr) => Ok(arr),
@@ -185,7 +177,12 @@ impl Value {
                 obj.borrow()
                     .map
                     .iter()
-                    .map(|(k, v)| Value::Array(Rc::new(RefCell::new(vec![k.clone(), v.clone()]))))
+                    .map(|(k, v)| {
+                        Value::Array(Rc::new(RefCell::new(vec![
+                            Value::String(k.clone()),
+                            v.clone(),
+                        ])))
+                    })
                     .collect::<Vec<_>>()
                     .into_iter(),
             )),
@@ -343,7 +340,7 @@ impl Value {
                     .unwrap_or_default()),
                 _ => Err(ErrorKind::InvalidArrayIndex),
             },
-            Self::Object(obj) => Ok(obj.borrow().get_property(key)?),
+            Self::Object(obj) => Ok(obj.borrow().get_property(&key.try_str()?)?),
             _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }
@@ -361,7 +358,7 @@ impl Value {
                 }
                 _ => Err(ErrorKind::InvalidArrayIndex),
             },
-            Self::Object(obj) => Ok(obj.borrow_mut().set_property(key, new_value)?),
+            Self::Object(obj) => Ok(obj.borrow_mut().set_property(key.try_str()?, new_value)?),
             _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }
