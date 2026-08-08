@@ -45,9 +45,9 @@ impl Codegen {
                     }
                     Some(args) => {
                         let base = self.total_size();
-                        for arg in &args {
-                            let local = self.push_eval_id();
-                            self.gen_expr(arg, Some(Store::Local(local)))?;
+                        self.last_frame_mut().eval_size += args.len() as LocalId;
+                        for (i, arg) in args.iter().enumerate() {
+                            self.gen_expr(arg, Some(Store::Local(i as LocalId + base)))?;
                         }
                         // Truncate to prevent call from accidentally passing more than needed parameters
                         self.push_bytecode(SpanOf(
