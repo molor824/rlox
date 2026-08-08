@@ -286,7 +286,7 @@ impl Interpreter {
     }
     fn call_function(&mut self, function: Rc<Function>, base: LocalId) -> Result<Value, ErrorKind> {
         let base_pointer = self.base_pointer() + base as usize;
-        let arity = self.memory.len() - base_pointer;
+        let arity = self.memory.len().saturating_sub(base_pointer);
         let signature = function.signature.as_ref();
         if signature.variadic {
             // additional arguments are all combined into list
