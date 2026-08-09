@@ -5,7 +5,7 @@ use crate::interpreter::{FnSignature, Interpreter};
 use std::rc::Rc;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum BinaryOps {
+pub enum BinaryOp {
     Add,
     Sub,
     Mul,
@@ -55,7 +55,7 @@ pub enum Bytecode {
     Nop,
     Dup, // s0 -> s0, s0
     // Binary operations
-    Binary(BinaryOps), // s0, s1 -> <BINARY> s0 s1
+    Binary(BinaryOp), // s0, s1 -> <BINARY> s0 s1
     // Unary operations
     Unary(UnaryOps), // s0 -> <UNARY> s0
     // Branching operations
@@ -63,25 +63,25 @@ pub enum Bytecode {
     // Global memory
     GlobalDeclare(ValueStr), // declare global
     GlobalReadOnly(ValueStr), // make global readonly
-    GlobalLoad(ValueStr), // () -> <GET_GLOBAL> .0
+    LoadGlobal(ValueStr), // () -> <GET_GLOBAL> .0
     GlobalStore(ValueStr), // s0 -> <SET_GLOBAL> .0 s0;
     // Local memory
     Truncate(usize), // truncate till current length
-    LocalLoad(usize), // () -> <LOAD_LOCAL> .0
-    LocalStore(usize), // s0 -> <STORE_LOCAL> .0 s0;
+    LoadLocal(usize), // () -> <LOAD_LOCAL> .0
+    StoreLocal(usize), // s0 -> <STORE_LOCAL> .0 s0;
     // Upvalue
-    UpvalueLoad(usize), // () -> <LOAD_UPVALUE> .0
-    UpvalueStore(usize), // s0 -> <STORE_UPVALUE> .0 s0;
+    LoadUpvalue(usize), // () -> <LOAD_UPVALUE> .0
+    StoreUpvalue(usize), // s0 -> <STORE_UPVALUE> .0 s0;
     // Property
-    PropertyLoad(ValueStr), // obj -> obj[.0]
-    PropertyLoadIndirect, // obj, key -> obj[key]
-    PropertyStore(ValueStr), // obj, val -> obj[.0] = val;
-    PropertyStoreIndirect, // obj, key, val -> obj[key] = val;
-    MethodLoad(ValueStr), // obj -> (\... -> obj[key](obj[key], ...))
+    LoadProperty(ValueStr), // obj -> obj[.0]
+    LoadPropertyIndirect, // obj, key -> obj[key]
+    StoreProperty(ValueStr), // obj, val -> obj[.0] = val;
+    StorePropertyIndirect, // obj, key, val -> obj[key] = val;
+    LoadMethod(ValueStr), // obj -> (\... -> obj[key](obj[key], ...))
     // Array initialization
-    StackToArray, // s0, s1, s2, ... -> [s0, s1, s2, ...]
+    StackToArray(usize), // starting at .0 offset: s0, s1, s2, ... -> [s0, s1, s2, ...]
     // Object initialization
-    StackToObj, // k0, v0, k1, v1, ... -> {k0: v0, k1: v1, ...}
+    StackToObj(usize), // starting at .0 offset: k0, v0, k1, v1, ... -> {k0: v0, k1: v1, ...}
     LoadNil,
     LoadBool(bool),
     LoadNum(f64),
@@ -90,7 +90,7 @@ pub enum Bytecode {
     // Jumping
     Jump(isize), // pc += .0
     // Function call
-    Call, // func, p0, p1, p2, ... -> func(p0, p1, p2, ...)
+    Call(usize), // starting at .0 offset: p0, p1, p2, ..., func -> func(p0, p1, p2, ...)
     // Return
     Return, // v0 -> return(v0);
 }

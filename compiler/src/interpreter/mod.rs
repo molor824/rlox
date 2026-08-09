@@ -16,13 +16,14 @@ pub mod value;
 
 struct FunctionFrame {
     base_pointer: usize,
+    base_stack: usize,
     function: Rc<Function>,
 }
 
 #[derive(Debug)]
 pub enum UpvalueLoc {
-    Local(LocalId),  // Get upvalue from parent frame's local memory
-    Shared(LocalId), // Get upvalue from parent frame's upvalue storage
+    Local(usize),  // Get upvalue from parent frame's local memory
+    Shared(usize), // Get upvalue from parent frame's upvalue storage
 }
 
 #[derive(Debug)]
@@ -71,14 +72,16 @@ impl Default for Cell {
     }
 }
 
+const INIT_MEM_SIZE: usize = 0x10000;
+
 pub struct Interpreter {
     memory: Vec<Cell>,
+    stack: Vec<Value>,
     current_frame: Option<FunctionFrame>,
     globals: FxHashMap<ValueStr, (Value, bool)>, // true - read-only
 }
 impl Default for Interpreter {
     fn default() -> Self {
-        const STACK_SIZE: usize = 0x10000;
         let globals = builtin::GLOBALS
             .iter()
             .cloned()
@@ -101,14 +104,30 @@ impl Default for Interpreter {
             })
             .collect::<FxHashMap<_, _>>();
         Self {
-            memory: Vec::with_capacity(STACK_SIZE),
+            memory: Vec::with_capacity(INIT_MEM_SIZE),
+            stack: Vec::new(),
             current_frame: None,
             globals,
         }
     }
 }
 impl Interpreter {
-    fn get_local(&self, id: LocalId) -> Value {
+    fn base_stack(&self) -> usize {
+        self.current_frame
+            .as_ref()
+            .map(|f| f.base_stack)
+            .unwrap_or(0)
+    }
+    fn push_stack(&mut self, value: Value) {
+        self.stack.push(value);
+    }
+    fn pop_stack(&mut self) -> Value {
+        if self.stack.len() <= self.base_stack() {
+            return Value::Nil;
+        }
+        self.stack.pop().expect("Stack underflow")
+    }
+    fn get_local(&self, id: usize) -> Value {
         let absolute_id = self.base_pointer() + id as usize;
         match self.memory.get(absolute_id) {
             Some(Cell::Value(v)) => v.clone(),
@@ -116,11 +135,8 @@ impl Interpreter {
             None => Value::Nil,
         }
     }
-    fn set_local(&mut self, id: LocalId, new_value: Value) -> Result<(), ErrorKind> {
+    fn set_local(&mut self, id: usize, new_value: Value) {
         let index = self.base_pointer() + id as usize;
-        if index >= self.memory.capacity() {
-            return Err(ErrorKind::StackOverflow);
-        }
         if index >= self.memory.len() {
             self.memory.resize_with(index + 1, Cell::default);
         }
@@ -128,48 +144,26 @@ impl Interpreter {
             Cell::Upvalue(up) => *up.borrow_mut() = new_value,
             Cell::Value(value) => *value = new_value,
         }
-        Ok(())
     }
-    fn make_local_upvalue(&mut self, id: LocalId) -> Result<Rc<RefCell<Value>>, ErrorKind> {
+    fn make_local_upvalue(&mut self, id: usize) -> Rc<RefCell<Value>> {
         let index = self.base_pointer() + id as usize;
-        match self.memory.get_mut(index) {
-            Some(cell) => match cell {
-                Cell::Upvalue(val) => Ok(val.clone()),
-                Cell::Value(val) => {
-                    let shared = Rc::new(RefCell::new(val.clone()));
-                    *cell = Cell::Upvalue(shared.clone());
-                    Ok(shared)
-                }
-            },
-            None => Err(ErrorKind::UninitCellShare),
+        let cell = &mut self.memory[index];
+        match cell {
+            Cell::Upvalue(val) => val.clone(),
+            Cell::Value(val) => {
+                let shared = Rc::new(RefCell::new(val.clone()));
+                *cell = Cell::Upvalue(shared.clone());
+                shared
+            }
         }
     }
-    fn get_upvalue(&self, id: LocalId) -> Result<Value, ErrorKind> {
-        let fun = self
-            .current_frame
-            .as_ref()
-            .ok_or(ErrorKind::UpvalueAccessInGlobal)?
-            .function
-            .as_ref();
-        Ok(fun
-            .upvalues
-            .get(id as usize)
-            .map(|upvalue| upvalue.borrow().clone())
-            .unwrap_or_default())
+    fn get_upvalue(&self, id: usize) -> Value {
+        let fun = self.current_frame.as_ref().unwrap().function.as_ref();
+        fun.upvalues[id].borrow().clone()
     }
-    fn set_upvalue(&self, id: LocalId, new_value: Value) -> Result<(), ErrorKind> {
-        let fun = self
-            .current_frame
-            .as_ref()
-            .ok_or(ErrorKind::UpvalueAccessInGlobal)?
-            .function
-            .as_ref();
-        if let Some(v) = fun.upvalues.get(id as usize) {
-            *v.borrow_mut() = new_value;
-            Ok(())
-        } else {
-            Err(ErrorKind::InvalidUpvalueAccess)
-        }
+    fn set_upvalue(&self, id: usize, new_value: Value) {
+        let fun = self.current_frame.as_ref().unwrap().function.as_ref();
+        *fun.upvalues[id].borrow_mut() = new_value;
     }
     fn make_global_read_only(&mut self, name: ValueStr) {
         self.globals.get_mut(&name).map(|global| global.1 = true);
@@ -204,24 +198,21 @@ impl Interpreter {
             .map(|frame| frame.base_pointer)
             .unwrap_or(0)
     }
-    fn method_currying(
-        &mut self,
-        itself: Value,
-        function: Rc<Function>,
-    ) -> Result<Function, ErrorKind> {
+    fn method_currying(&mut self, itself: Value, function: Rc<Function>) -> Function {
         let function1 = function.clone();
         let curried_method = move |interpreter: &mut Self| -> Result<Value, ErrorKind> {
             // shift all arguments forward, while inserting itself
-            let current_frame = interpreter
-                .current_frame
-                .as_ref()
-                .ok_or(ErrorKind::UpvalueAccessInGlobal)?;
+            let current_frame = interpreter.current_frame.as_ref().unwrap();
             let arity = current_frame.function.signature.required_arity();
             let base_pointer = current_frame.base_pointer;
 
-            interpreter.set_local(arity as LocalId, itself.clone())?;
+            interpreter.set_local(arity, itself.clone());
             interpreter.memory[base_pointer..].rotate_right(1);
-            interpreter.call_function_unchecked(function.clone(), base_pointer)
+            interpreter.call_function_unchecked(
+                function.clone(),
+                base_pointer,
+                interpreter.stack.len(),
+            )
         };
         self.create_function(Rc::new(FnSignature {
             body: FnBody::Builtin(Box::new(curried_method)),
@@ -230,33 +221,33 @@ impl Interpreter {
             upvalues: vec![],
         }))
     }
-    pub fn create_function(&mut self, signature: Rc<FnSignature>) -> Result<Function, ErrorKind> {
+    pub fn create_function(&mut self, signature: Rc<FnSignature>) -> Function {
         let upvalues = signature
             .upvalues
             .iter()
             .map(|loc| match loc {
-                UpvalueLoc::Shared(id) => Ok(self
-                    .current_frame
-                    .as_ref()
-                    .ok_or(ErrorKind::UpvalueAccessInGlobal)?
-                    .function
-                    .upvalues[*id as usize]
-                    .clone()),
+                UpvalueLoc::Shared(id) => {
+                    self.current_frame.as_ref().unwrap().function.upvalues[*id].clone()
+                }
                 UpvalueLoc::Local(id) => self.make_local_upvalue(*id),
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Function {
+            .collect::<Vec<_>>();
+        Function {
             signature,
             upvalues,
-        })
+        }
     }
     fn call_function_unchecked(
         &mut self,
         function: Rc<Function>,
         base_pointer: usize,
+        base_stack: usize,
     ) -> Result<Value, ErrorKind> {
+        self.stack.truncate(base_stack);
+
         let mut old_frame = Some(FunctionFrame {
             base_pointer,
+            base_stack,
             function: function.clone(),
         });
         mem::swap(&mut old_frame, &mut self.current_frame);
@@ -282,33 +273,45 @@ impl Interpreter {
 
         Ok(return_value)
     }
-    fn call_function(&mut self, function: Rc<Function>, base: LocalId) -> Result<Value, ErrorKind> {
-        let base_pointer = self.base_pointer() + base as usize;
-        let arity = self.memory.len().saturating_sub(base_pointer);
-        let signature = function.signature.as_ref();
-        if signature.variadic {
-            // additional arguments are all combined into list
-            let array = (signature.arity..arity)
-                .map(|i| self.get_local(i as LocalId + base))
-                .collect::<Vec<_>>();
-            let variadic = Value::Array(Rc::new(RefCell::new(array)));
-            self.set_local(signature.arity as LocalId + base, variadic)?;
-        }
-        // Truncate until it's no longer past the expected arity
-        self.truncate(base as usize + signature.required_arity());
+    fn call_function(&mut self, base_stack: usize) -> Result<Value, ErrorKind> {
+        let next_base_stack = base_stack + self.base_stack();
+        let base_pointer = self.memory.len();
+        let function = self.pop_stack().try_function()?;
+        let arity = self.stack.len() - next_base_stack;
 
-        self.call_function_unchecked(function, base_pointer)
+        for i in 0..function.signature.arity {
+            let Some(elem) = self.stack.get(i + next_base_stack).cloned() else {
+                break;
+            };
+            self.memory.push(Cell::Value(elem));
+        }
+
+        if function.signature.variadic {
+            let array = Value::Array(Rc::new(RefCell::new(
+                (function.signature.arity..arity)
+                    .map(|i| self.stack[i + next_base_stack].clone())
+                    .collect::<Vec<_>>(),
+            )));
+            let loc = base_pointer + function.signature.arity;
+            if self.memory.len() <= loc {
+                self.memory.resize_with(loc + 1, Cell::default);
+            }
+            self.memory[loc] = Cell::Value(array);
+        }
+
+        self.call_function_unchecked(function, base_pointer, base_stack)
     }
     pub fn call_function_args(
         &mut self,
         function: Rc<Function>,
         args: impl IntoIterator<Item = Value>,
     ) -> Result<Value, ErrorKind> {
-        let base = self.memory.len() - self.base_pointer();
+        let base = self.stack.len();
         for arg in args {
-            self.memory.push(Cell::Value(arg));
+            self.stack.push(arg);
         }
-        self.call_function(function, base as LocalId)
+        self.stack.push(Value::Function(function));
+        self.call_function(base)
     }
 }
 
@@ -318,7 +321,7 @@ mod tests {
 
     use crate::{
         interpreter::{
-            bytecode::{Bytecode, Load, Store},
+            bytecode::{BinaryOp, BranchCond, Bytecode},
             string::ValueStr,
             value::Value,
             FnBody, FnSignature, Interpreter, UpvalueLoc,
@@ -330,8 +333,10 @@ mod tests {
     fn basic_function() {
         #[rustfmt::skip]
         let bytecode = [
-            Bytecode::Add { dst: Store::Local(2), src0: Load::Local(0), src1: Load::Local(1) },
-            Bytecode::Return(Load::Local(2)),
+            Bytecode::LoadLocal(0),
+            Bytecode::LoadLocal(1),
+            Bytecode::Binary(BinaryOp::Add),
+            Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
             arity: 2,
@@ -340,7 +345,7 @@ mod tests {
             upvalues: vec![],
         });
         let mut interpreter = Interpreter::default();
-        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let function = Rc::new(interpreter.create_function(signature));
         let result = interpreter
             .call_function_args(function, [Value::Number(1.0), Value::Number(2.0)])
             .unwrap();
@@ -354,18 +359,33 @@ mod tests {
     fn fibonacci_iterative() {
         #[rustfmt::skip]
         let bytecode = [
-            Bytecode::Move { dst: Store::Local(1), src: Load::Number(0.0) },
-            Bytecode::Move { dst: Store::Local(2), src: Load::Number(1.0) },
-            Bytecode::Move { dst: Store::Local(3), src: Load::Number(0.0) },
-            // While start
-            Bytecode::BrGe { offset: 6, src0: Load::Local(3), src1: Load::Local(0) },
-            Bytecode::Add { dst: Store::Local(4), src0: Load::Local(1), src1: Load::Local(2) },
-            Bytecode::Move { dst: Store::Local(1), src: Load::Local(2) },
-            Bytecode::Move { dst: Store::Local(2), src: Load::Local(4) },
-            Bytecode::Add { dst: Store::Local(3), src0: Load::Local(3), src1: Load::Number(1.0) },
-            Bytecode::Jump(-5),
+            Bytecode::LoadNum(0.0),
+            Bytecode::LoadNum(1.0),
+            Bytecode::StoreLocal(2),
+            Bytecode::StoreLocal(1),
+
+            // while start
+            Bytecode::LoadLocal(0),
+            Bytecode::LoadNum(0.0),
+            Bytecode::Branch(BranchCond::Gt, 12),
+
+            Bytecode::LoadLocal(1),
+            Bytecode::LoadLocal(2),
+            Bytecode::Binary(BinaryOp::Add),
+
+            Bytecode::LoadLocal(2),
+            Bytecode::StoreLocal(1),
+            Bytecode::StoreLocal(2),
+
+            Bytecode::LoadLocal(0),
+            Bytecode::LoadNum(1.0),
+            Bytecode::Binary(BinaryOp::Sub),
+            Bytecode::StoreLocal(0),
+
+            Bytecode::Jump(-13),
             // While end
-            Bytecode::Return(Load::Local(1)),
+            Bytecode::LoadLocal(1),
+            Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
             arity: 1,
@@ -374,7 +394,7 @@ mod tests {
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
-        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let function = Rc::new(interpreter.create_function(signature));
         let mut a = 0.0;
         let mut b = 1.0;
         for i in 0..=100 {
@@ -397,14 +417,27 @@ mod tests {
 
         #[rustfmt::skip]
         let bytecode = [
-            Bytecode::BrLe { offset: 7, src0: Load::Local(0), src1: Load::Number(1.0) },
-            Bytecode::Sub { dst: Store::Local(1), src0: Load::Local(0), src1: Load::Number(1.0) },
-            Bytecode::Call { src: Load::Global(name.clone()), dst: Store::Local(1), base: 1 },
-            Bytecode::Sub { dst: Store::Local(2), src0: Load::Local(0), src1: Load::Number(2.0) },
-            Bytecode::Call { src: Load::Global(name.clone()), dst: Store::Local(2), base: 2 },
-            Bytecode::Add { dst: Store::Local(3), src0: Load::Local(1), src1: Load::Local(2) },
-            Bytecode::Return(Load::Local(3)),
-            Bytecode::Return(Load::Local(0)),
+            Bytecode::LoadLocal(0),
+            Bytecode::LoadNum(1.0),
+            Bytecode::Branch(BranchCond::Le, 13),
+
+            Bytecode::LoadLocal(0),
+            Bytecode::LoadNum(1.0),
+            Bytecode::Binary(BinaryOp::Sub),
+            Bytecode::LoadGlobal(name.clone()),
+            Bytecode::Call(0),
+
+            Bytecode::LoadLocal(0),
+            Bytecode::LoadNum(2.0),
+            Bytecode::Binary(BinaryOp::Sub),
+            Bytecode::LoadGlobal(name.clone()),
+            Bytecode::Call(1),
+
+            Bytecode::Binary(BinaryOp::Add),
+            Bytecode::Return,
+
+            Bytecode::LoadLocal(0),
+            Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
             arity: 1,
@@ -413,7 +446,7 @@ mod tests {
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
-        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let function = Rc::new(interpreter.create_function(signature));
         interpreter.declare_global(name.clone()).unwrap();
         interpreter
             .set_global(name, Value::Function(function.clone()))
@@ -443,33 +476,44 @@ mod tests {
 
         #[rustfmt::skip]
         let inc_bytecode = [
-            Bytecode::Add { dst: Store::Upvalue(0), src0: Load::Upvalue(0), src1: Load::Number(1.0) },
-            Bytecode::Return(Load::Upvalue(0)),
+            Bytecode::LoadUpvalue(0),
+            Bytecode::LoadNum(1.0),
+            Bytecode::Binary(BinaryOp::Add),
+            Bytecode::Dup,
+            Bytecode::StoreUpvalue(0),
+            Bytecode::Return,
         ];
         let inc_signature = Rc::new(FnSignature {
             arity: 0,
             variadic: false,
-            upvalues: vec![UpvalueLoc::Local(1)],
+            upvalues: vec![UpvalueLoc::Local(0)],
             body: FnBody::Bytecode(inc_bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         #[rustfmt::skip]
         let dec_bytecode = [
-            Bytecode::Sub { dst: Store::Upvalue(0), src0: Load::Upvalue(0), src1: Load::Number(1.0) },
-            Bytecode::Return(Load::Upvalue(0)),
+            Bytecode::LoadUpvalue(0),
+            Bytecode::LoadNum(1.0),
+            Bytecode::Binary(BinaryOp::Sub),
+            Bytecode::Dup,
+            Bytecode::StoreUpvalue(0),
+            Bytecode::Return,
         ];
         let dec_signature = Rc::new(FnSignature {
             arity: 0,
             variadic: false,
-            upvalues: vec![UpvalueLoc::Local(1)],
+            upvalues: vec![UpvalueLoc::Local(0)],
             body: FnBody::Bytecode(dec_bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         #[rustfmt::skip]
         let bytecode = [
-            Bytecode::Move { dst: Store::Local(0), src: Load::Object(2) },
-            Bytecode::Move { dst: Store::Local(1), src: Load::Number(0.0) },
-            Bytecode::StoreProperty { dst: Load::Local(0), prop: inc_name.clone(), src: Load::Function(inc_signature.clone()) },
-            Bytecode::StoreProperty { dst: Load::Local(0), prop: dec_name.clone(), src: Load::Function(dec_signature.clone()) },
-            Bytecode::Return(Load::Local(0)),
+            Bytecode::LoadNum(0.0),
+            Bytecode::StoreLocal(0),
+            Bytecode::LoadStr(inc_name.clone()),
+            Bytecode::LoadFn(inc_signature.clone()),
+            Bytecode::LoadStr(dec_name.clone()),
+            Bytecode::LoadFn(dec_signature.clone()),
+            Bytecode::StackToObj(0),
+            Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {
             arity: 0,
@@ -478,18 +522,18 @@ mod tests {
             body: FnBody::Bytecode(bytecode.map(|bc| SpanOf(Span::default(), bc)).to_vec()),
         });
         let mut interpreter = Interpreter::default();
-        let function = Rc::new(interpreter.create_function(signature).unwrap());
+        let function = Rc::new(interpreter.create_function(signature));
         let result = interpreter.call_function_args(function, []).unwrap();
 
         let inc = result
             .get_property(&Value::String(inc_name))
             .unwrap()
-            .as_callable()
+            .try_function()
             .unwrap();
         let dec = result
             .get_property(&Value::String(dec_name))
             .unwrap()
-            .as_callable()
+            .try_function()
             .unwrap();
         assert_eq!(
             interpreter.call_function_args(inc, []).unwrap(),

@@ -368,7 +368,7 @@ impl Value {
             _ => Err(ErrorKind::InvalidType(self.type_str(), "number")),
         }
     }
-    pub fn as_callable(&self) -> Result<Rc<Function>, ErrorKind> {
+    pub fn try_function(&self) -> Result<Rc<Function>, ErrorKind> {
         match self {
             Self::Function(fun) => Ok(fun.clone()),
             _ => Err(ErrorKind::InvalidType(self.type_str(), "function")),
