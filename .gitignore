@@ -2,3 +2,4 @@
 /.vscode
 /.idea
 .test.rlox
+Cargo.lock
