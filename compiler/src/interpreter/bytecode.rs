@@ -2,6 +2,8 @@ use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
 use crate::interpreter::value::{Object, Value};
 use crate::interpreter::{FnSignature, Interpreter};
+use std::cell::RefCell;
+use std::mem::replace;
 use std::rc::Rc;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -26,7 +28,7 @@ pub enum BinaryOp {
     SetGe,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnaryOps {
+pub enum UnaryOp {
     Negate,
     Swap,
     SetTrue,
@@ -53,18 +55,18 @@ pub enum BranchCond {
 /// The memory automatically grows if the memory index is past the stack pointer.
 pub enum Bytecode {
     Nop,
-    Dup, // s0 -> s0, s0
+    Dup(usize), // s0 -> [s0; .0]
     // Binary operations
     Binary(BinaryOp), // s0, s1 -> <BINARY> s0 s1
     // Unary operations
-    Unary(UnaryOps), // s0 -> <UNARY> s0
+    Unary(UnaryOp), // s0 -> <UNARY> s0
     // Branching operations
     Branch(BranchCond, isize), // if BranchCond::True || BranchCond::False then s0 -> <BR_IF> .0 s0; else s0, s1 -> <BR_IF> .0 s0 s1;
     // Global memory
     GlobalDeclare(ValueStr), // declare global
     GlobalReadOnly(ValueStr), // make global readonly
     LoadGlobal(ValueStr), // () -> <GET_GLOBAL> .0
-    GlobalStore(ValueStr), // s0 -> <SET_GLOBAL> .0 s0;
+    StoreGlobal(ValueStr), // s0 -> <SET_GLOBAL> .0 s0;
     // Local memory
     Truncate(usize), // truncate till current length
     LoadLocal(usize), // () -> <LOAD_LOCAL> .0
@@ -80,13 +82,12 @@ pub enum Bytecode {
     LoadMethod(ValueStr), // obj -> (\... -> obj[key](obj[key], ...))
     // Array initialization
     StackToArray(usize), // starting at .0 offset: s0, s1, s2, ... -> [s0, s1, s2, ...]
-    // Object initialization
-    StackToObj(usize), // starting at .0 offset: k0, v0, k1, v1, ... -> {k0: v0, k1: v1, ...}
     LoadNil,
     LoadBool(bool),
     LoadNum(f64),
     LoadFn(Rc<FnSignature>),
     LoadStr(ValueStr),
+    LoadObj(usize), // () -> obj::with_capacity(.0)
     // Jumping
     Jump(isize), // pc += .0
     // Function call
@@ -104,213 +105,148 @@ impl Bytecode {
     ) -> Result<Result<usize, Value>, ErrorKind> {
         match self {
             Bytecode::Nop => {}
-            Bytecode::Add { src0, src1, dst } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, v0.try_add(&v1)?)?;
+            Bytecode::Dup(n) => {
+                let v = interpreter.pop_stack();
+                for _ in 0..*n {
+                    interpreter.push_stack(v.clone());
+                }
             }
-            Bytecode::Sub { src0, src1, dst } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, v0.try_sub(&v1)?)?;
+            Bytecode::Binary(op) => {
+                let b = interpreter.pop_stack();
+                let a = interpreter.pop_stack();
+                interpreter.push_stack(match op {
+                    BinaryOp::Add => a.try_add(&b)?,
+                    BinaryOp::Sub => a.try_sub(&b)?,
+                    BinaryOp::Mul => a.try_mul(&b)?,
+                    BinaryOp::Div => a.try_div(&b)?,
+                    BinaryOp::Rem => a.try_rem(&b)?,
+                    BinaryOp::SetEq => Value::Bool(a == b),
+                    BinaryOp::SetNe => Value::Bool(a != b),
+                    BinaryOp::SetLt => Value::Bool(a.try_cmp(&b)?.is_some_and(|c| c.is_lt())),
+                    BinaryOp::SetLe => Value::Bool(a.try_cmp(&b)?.is_some_and(|c| c.is_le())),
+                    BinaryOp::SetGt => Value::Bool(a.try_cmp(&b)?.is_some_and(|c| c.is_gt())),
+                    BinaryOp::SetGe => Value::Bool(a.try_cmp(&b)?.is_some_and(|c| c.is_ge())),
+                    op => todo!("Operator {op:?} is not yet implemented."),
+                });
             }
-            Bytecode::Mul { src0, src1, dst } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, v0.try_mul(&v1)?)?;
-            }
-            Bytecode::Div { src0, src1, dst } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, v0.try_div(&v1)?)?;
-            }
-            Bytecode::Rem { src0, src1, dst } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, v0.try_rem(&v1)?)?;
-            }
-            Bytecode::SetEq { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, Value::Bool(v0 == v1))?;
-            }
-            Bytecode::SetNe { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(interpreter, Value::Bool(v0 != v1))?;
-            }
-            Bytecode::SetLt { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(
-                    interpreter,
-                    Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_lt())),
-                )?;
-            }
-            Bytecode::SetGt { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(
-                    interpreter,
-                    Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_gt())),
-                )?;
-            }
-            Bytecode::SetLe { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(
-                    interpreter,
-                    Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_le())),
-                )?;
-            }
-            Bytecode::SetGe { dst, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                dst.store(
-                    interpreter,
-                    Value::Bool(v0.try_cmp(&v1)?.is_some_and(|ord| ord.is_ge())),
-                )?;
-            }
-            Bytecode::Negate { dst, src } => {
-                let value = src.load(interpreter)?;
-                dst.store(interpreter, value.try_neg()?)?;
-            }
-            Bytecode::Invert { dst, src } => {
-                let value = src.load(interpreter)?;
-                dst.store(interpreter, value.try_inv()?)?;
-            }
-            Bytecode::SetTrue { dst, src } => {
-                let value = src.load(interpreter)?;
-                dst.store(interpreter, Value::Bool(value.as_bool()))?;
-            }
-            Bytecode::SetFalse { dst, src } => {
-                let value = src.load(interpreter)?;
-                dst.store(interpreter, Value::Bool(!value.as_bool()))?;
+            Bytecode::Unary(op) => {
+                let a = interpreter.pop_stack();
+                interpreter.push_stack(match op {
+                    UnaryOp::Negate => a.try_neg()?,
+                    UnaryOp::Swap => a.try_swap()?,
+                    UnaryOp::SetFalse => Value::Bool(!a.as_bool()),
+                    UnaryOp::SetTrue => Value::Bool(a.as_bool()),
+                });
             }
             Bytecode::GlobalReadOnly(name) => interpreter.make_global_read_only(name.clone()),
             Bytecode::GlobalDeclare(name) => interpreter.declare_global(name.clone())?,
-            Bytecode::LoadProperty { dst, src, prop } => {
-                let property = src
-                    .load(interpreter)?
-                    .get_property(&Value::String(prop.clone()))?;
-                dst.store(interpreter, property)?;
+            Bytecode::LoadProperty(name) => {
+                let prop = interpreter
+                    .pop_stack()
+                    .get_property(&Value::String(name.clone()))?;
+                interpreter.push_stack(prop);
             }
-            Bytecode::LoadMethod { dst, src, prop } => {
-                let itself = src.load(interpreter)?;
-                let function = itself
-                    .get_property(&Value::String(prop.clone()))?
-                    .as_callable()?;
-                let method = Rc::new(interpreter.method_currying(itself, function)?);
-                dst.store(interpreter, Value::Function(method))?;
+            Bytecode::LoadMethod(name) => {
+                let obj = interpreter.pop_stack();
+                let method = interpreter.method_currying(
+                    obj.clone(),
+                    obj.get_property(&Value::String(name.clone()))?
+                        .try_function()?,
+                );
+                interpreter.push_stack(Value::Function(Rc::new(method)));
             }
-            Bytecode::LoadPropertyIndirect { dst, src, prop } => {
-                let obj = src.load(interpreter)?;
-                let key = prop.load(interpreter)?;
-                let property = obj.get_property(&key)?;
-                dst.store(interpreter, property)?;
+            Bytecode::LoadPropertyIndirect => {
+                let prop = interpreter.pop_stack();
+                let obj = interpreter.pop_stack();
+                interpreter.push_stack(obj.get_property(&prop)?);
             }
-            Bytecode::StoreProperty { dst, src, prop } => {
-                let value = src.load(interpreter)?;
-                let obj = dst.load(interpreter)?;
+            Bytecode::StoreProperty(prop) => {
+                let value = interpreter.pop_stack();
+                let obj = interpreter.pop_stack();
                 obj.set_property(Value::String(prop.clone()), value)?;
             }
-            Bytecode::StorePropertyIndirect { dst, src, prop } => {
-                let value = src.load(interpreter)?;
-                let obj = dst.load(interpreter)?;
-                let key = prop.load(interpreter)?;
-                obj.set_property(key, value)?;
+            Bytecode::StorePropertyIndirect => {
+                let value = interpreter.pop_stack();
+                let prop = interpreter.pop_stack();
+                let obj = interpreter.pop_stack();
+                obj.set_property(prop, value)?;
             }
-            Bytecode::BrTrue { src, offset } => {
-                let value = src.load(interpreter)?;
-                if value.as_bool() {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::LoadGlobal(name) => {
+                interpreter.push_stack(interpreter.get_global(name.clone()))
             }
-            Bytecode::BrFalse { src, offset } => {
-                let value = src.load(interpreter)?;
-                if !value.as_bool() {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::StoreGlobal(name) => {
+                let v = interpreter.pop_stack();
+                interpreter.set_global(name.clone(), v)?
             }
-            Bytecode::BrEq { offset, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                if v0 == v1 {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::LoadLocal(id) => {
+                interpreter.push_stack(interpreter.get_local(*id));
             }
-            Bytecode::BrNe { offset, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                if v0 != v1 {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::StoreLocal(id) => {
+                let v = interpreter.pop_stack();
+                interpreter.set_local(*id, v);
             }
-            Bytecode::BrGe { offset, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_ge()) {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::LoadUpvalue(id) => {
+                interpreter.push_stack(interpreter.get_upvalue(*id));
             }
-            Bytecode::BrLe { offset, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_le()) {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::StoreUpvalue(id) => {
+                let value = interpreter.pop_stack();
+                interpreter.set_upvalue(*id, value);
             }
-            Bytecode::BrGt { offset, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_gt()) {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
+            Bytecode::LoadNil => interpreter.push_stack(Value::Nil),
+            Bytecode::LoadBool(b) => interpreter.push_stack(Value::Bool(*b)),
+            Bytecode::LoadNum(n) => interpreter.push_stack(Value::Number(*n)),
+            Bytecode::LoadFn(f) => {
+                let fun = interpreter.create_function(f.clone());
+                interpreter.push_stack(Value::Function(Rc::new(fun)));
             }
-            Bytecode::BrLt { offset, src0, src1 } => {
-                let v0 = src0.load(interpreter)?;
-                let v1 = src1.load(interpreter)?;
-                if v0.try_cmp(&v1)?.is_some_and(|cmp| cmp.is_lt()) {
-                    return Ok(Ok(((index as isize) + *offset) as usize));
-                }
-            }
-            Bytecode::Jump(offset) => return Ok(Ok(((index as isize) + *offset) as usize)),
-            Bytecode::Move { dst, src } => {
-                let value = src.load(interpreter)?;
-                dst.store(interpreter, value)?;
-            }
-            Bytecode::Truncate(new_len) => interpreter.truncate(*new_len),
-            Bytecode::Return(src) => return src.load(interpreter).map(Err),
-            Bytecode::Call { src, base, dst } => {
-                let function = src.load(interpreter)?.as_callable()?;
-                let value = interpreter.call_function(function, *base)?;
-                dst.store(interpreter, value)?;
-            }
-            Bytecode::AppendElement { dst, src } => {
-                dst.load(interpreter)?
-                    .try_array()?
-                    .borrow_mut()
-                    .push(src.load(interpreter)?);
-            }
-            Bytecode::AppendElements { dst, src } => {
-                dst.load(interpreter)?
-                    .try_array()?
-                    .borrow_mut()
-                    .extend(src.load(interpreter)?.try_iterator()?);
-            }
-            Bytecode::StoreProperties { dst, src } => {
-                let dst_obj = dst.load(interpreter)?;
-                let src_iter = src.load(interpreter)?.try_iterator()?;
+            Bytecode::LoadObj(c) => interpreter.push_stack(Value::Object(Rc::new(RefCell::new(
+                Object::with_capacity(*c),
+            )))),
+            Bytecode::LoadStr(s) => interpreter.push_stack(Value::String(s.clone())),
+            Bytecode::StackToArray(base) => {
+                let vec = interpreter.stack[*base..]
+                    .iter_mut()
+                    .map(|v| replace(v, Value::Nil))
+                    .collect::<Vec<_>>();
+                interpreter.stack.truncate(*base);
 
-                for v in src_iter {
-                    let arr = v.try_array()?;
-                    dst_obj.set_property(
-                        arr.borrow().get(0).cloned().unwrap_or_default(),
-                        arr.borrow().get(1).cloned().unwrap_or_default(),
-                    )?;
+                interpreter.push_stack(Value::Array(Rc::new(RefCell::new(vec))));
+            }
+            Bytecode::Branch(cond, offset) => {
+                let b = interpreter.pop_stack();
+                let condition = match cond {
+                    BranchCond::False => !b.as_bool(),
+                    BranchCond::True => b.as_bool(),
+                    BranchCond::Eq => interpreter.pop_stack() == b,
+                    BranchCond::Ne => interpreter.pop_stack() != b,
+                    BranchCond::Lt => interpreter
+                        .pop_stack()
+                        .try_cmp(&b)?
+                        .is_some_and(|c| c.is_lt()),
+                    BranchCond::Gt => interpreter
+                        .pop_stack()
+                        .try_cmp(&b)?
+                        .is_some_and(|c| c.is_gt()),
+                    BranchCond::Le => interpreter
+                        .pop_stack()
+                        .try_cmp(&b)?
+                        .is_some_and(|c| c.is_le()),
+                    BranchCond::Ge => interpreter
+                        .pop_stack()
+                        .try_cmp(&b)?
+                        .is_some_and(|c| c.is_ge()),
+                };
+                if condition {
+                    return Ok(Ok(index.wrapping_add_signed(*offset)));
                 }
             }
-            bc => todo!("{bc:?} is not implemented yet!"),
+            Bytecode::Jump(offset) => return Ok(Ok(index.wrapping_add_signed(*offset))),
+            Bytecode::Truncate(new_len) => interpreter.truncate(*new_len),
+            Bytecode::Return => return Ok(Err(interpreter.pop_stack())),
+            Bytecode::Call(base) => {
+                let v = interpreter.call_function(*base)?;
+                interpreter.push_stack(v);
+            }
         }
         Ok(Ok(index + 1))
     }

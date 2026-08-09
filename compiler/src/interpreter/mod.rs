@@ -1,6 +1,6 @@
 use core::fmt;
 use std::cell::RefCell;
-use std::mem;
+use std::mem::{self, replace};
 use std::rc::Rc;
 
 use crate::error::ErrorKind;
@@ -277,19 +277,19 @@ impl Interpreter {
         let next_base_stack = base_stack + self.base_stack();
         let base_pointer = self.memory.len();
         let function = self.pop_stack().try_function()?;
-        let arity = self.stack.len() - next_base_stack;
+        let stack_len = self.stack.len();
 
-        for i in 0..function.signature.arity {
-            let Some(elem) = self.stack.get(i + next_base_stack).cloned() else {
-                break;
-            };
-            self.memory.push(Cell::Value(elem));
-        }
+        let iter = self.stack
+            [next_base_stack..((next_base_stack + function.signature.arity).min(stack_len))]
+            .iter_mut();
+        self.memory
+            .extend(iter.map(|elem| Cell::Value(replace(elem, Value::Nil))));
 
         if function.signature.variadic {
             let array = Value::Array(Rc::new(RefCell::new(
-                (function.signature.arity..arity)
-                    .map(|i| self.stack[i + next_base_stack].clone())
+                self.stack[(next_base_stack + function.signature.arity)..]
+                    .iter_mut()
+                    .map(|elem| replace(elem, Value::Nil))
                     .collect::<Vec<_>>(),
             )));
             let loc = base_pointer + function.signature.arity;
@@ -479,7 +479,7 @@ mod tests {
             Bytecode::LoadUpvalue(0),
             Bytecode::LoadNum(1.0),
             Bytecode::Binary(BinaryOp::Add),
-            Bytecode::Dup,
+            Bytecode::Dup(2),
             Bytecode::StoreUpvalue(0),
             Bytecode::Return,
         ];
@@ -494,7 +494,7 @@ mod tests {
             Bytecode::LoadUpvalue(0),
             Bytecode::LoadNum(1.0),
             Bytecode::Binary(BinaryOp::Sub),
-            Bytecode::Dup,
+            Bytecode::Dup(2),
             Bytecode::StoreUpvalue(0),
             Bytecode::Return,
         ];
@@ -508,11 +508,12 @@ mod tests {
         let bytecode = [
             Bytecode::LoadNum(0.0),
             Bytecode::StoreLocal(0),
-            Bytecode::LoadStr(inc_name.clone()),
+            Bytecode::LoadObj(2),
+            Bytecode::Dup(3),
             Bytecode::LoadFn(inc_signature.clone()),
-            Bytecode::LoadStr(dec_name.clone()),
+            Bytecode::StoreProperty(inc_name.clone()),
             Bytecode::LoadFn(dec_signature.clone()),
-            Bytecode::StackToObj(0),
+            Bytecode::StoreProperty(dec_name.clone()),
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {

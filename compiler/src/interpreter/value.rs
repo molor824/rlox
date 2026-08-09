@@ -301,7 +301,7 @@ impl Value {
             _ => error(),
         }
     }
-    pub fn try_inv(&self) -> Result<Value, ErrorKind> {
+    pub fn try_swap(&self) -> Result<Value, ErrorKind> {
         let error = || Err(ErrorKind::InvalidUnary("~", self.type_str()));
         match self {
             Self::Number(n) => Ok(Self::Number(!(*n as i64) as f64)),
