@@ -2,7 +2,7 @@ use crate::{
     ast::statement::Statement,
     codegen::{Codegen, Scope, ScopeKind},
     error::{Error, ErrorKind, Result},
-    interpreter::bytecode::{Bytecode, Load},
+    interpreter::bytecode::Bytecode,
     span::{GetSpan, Span, SpanOf},
 };
 
@@ -28,7 +28,7 @@ impl Codegen {
     }
     fn trunc_eval(&mut self) {
         let f = self.last_frame_mut();
-        f.eval_size = 0;
+        f.stack_size = 0;
         let len = f.total_size();
         self.push_bytecode(SpanOf(Span::default(), Bytecode::Truncate(len as usize)));
     }
@@ -37,7 +37,7 @@ impl Codegen {
         match statement {
             Statement::Declaration(decl) => {
                 self.gen_decl(decl)?;
-                self.last_frame_mut().eval_size = 0;
+                self.last_frame_mut().stack_size = 0;
             }
             Statement::If {
                 condition,
@@ -50,7 +50,7 @@ impl Codegen {
                 let load_cond = self.gen_expr(condition, None)?;
                 let br_index = self.bytecodes().len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
-                self.last_frame_mut().eval_size = 0;
+                self.last_frame_mut().stack_size = 0;
 
                 for stmt in &met_block.1 {
                     self.gen_statement(stmt)?;
@@ -93,7 +93,7 @@ impl Codegen {
                 let load_cond = self.gen_expr(condition, None)?;
                 let skip_start = self.bytecodes().len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
-                self.last_frame_mut().eval_size = 0;
+                self.last_frame_mut().stack_size = 0;
 
                 for stmt in &block.1 {
                     self.gen_statement(stmt)?;

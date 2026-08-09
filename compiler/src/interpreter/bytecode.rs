@@ -88,6 +88,8 @@ pub enum Bytecode {
     LoadFn(Rc<FnSignature>),
     LoadStr(ValueStr),
     LoadObj(usize), // () -> obj::with_capacity(.0)
+    UnpackIter, // s0 -> *iter(s0)
+    MergeObj, // obj, iter -> obj with { *iter } applied (iter should return [k, v])
     // Jumping
     Jump(isize), // pc += .0
     // Function call
@@ -109,6 +111,19 @@ impl Bytecode {
                 let v = interpreter.pop_stack();
                 for _ in 0..*n {
                     interpreter.push_stack(v.clone());
+                }
+            }
+            Bytecode::UnpackIter => {
+                let iter = interpreter.pop_stack().try_iterator()?;
+                interpreter.stack.extend(iter);
+            }
+            Bytecode::MergeObj => {
+                let iter = interpreter.pop_stack().try_iterator()?;
+                let obj = interpreter.pop_stack();
+                for pair in iter {
+                    let k = pair.get_property(&Value::Number(0.0))?;
+                    let v = pair.get_property(&Value::Number(1.0))?;
+                    obj.set_property(k, v)?;
                 }
             }
             Bytecode::Binary(op) => {

@@ -4,212 +4,105 @@ use crate::{
     ast::expression::{Element, Expression, Pair},
     codegen::Codegen,
     error::Result,
-    interpreter::bytecode::{Bytecode, Load, Store},
+    interpreter::{bytecode::Bytecode, string::ValueStr},
     span::{GetSpan, SpanOf},
 };
 
 impl Codegen {
-    pub(crate) fn gen_array(
-        &mut self,
-        arr: &SpanOf<Vec<Element>>,
-        store_method: Option<Store>,
-    ) -> Result<Load> {
-        let store_method = match store_method {
-            Some(s) => s,
-            None if arr.1.is_empty() => return Ok(Load::Array(0)),
-            None => Store::Local(self.push_eval_id()),
-        };
-        self.push_bytecode(SpanOf(
-            arr.0,
-            Bytecode::Move {
-                dst: store_method.clone(),
-                src: Load::Array(arr.1.len()),
-            },
-        ));
-        let load_method = store_method.to_load();
+    pub(crate) fn gen_array(&mut self, arr: &SpanOf<Vec<Element>>) -> Result<()> {
+        let base = self.stack_size();
         for elem in arr.1.iter() {
             match elem {
                 Element::Regular(expr) => {
-                    let load = self.gen_expr(expr, None)?;
-                    self.push_bytecode(SpanOf(
-                        expr.span(),
-                        Bytecode::AppendElement {
-                            dst: load_method.clone(),
-                            src: load,
-                        },
-                    ));
+                    self.gen_expr(expr)?;
                 }
                 Element::Unpack(unpack) => {
-                    let load = self.gen_expr(&unpack.1, None)?;
-                    self.push_bytecode(SpanOf(
-                        unpack.0,
-                        Bytecode::AppendElements {
-                            dst: load_method.clone(),
-                            src: load,
-                        },
-                    ));
+                    self.gen_expr(&unpack.1)?;
+                    self.push_bytecode(SpanOf(unpack.0, Bytecode::UnpackIter));
                 }
             }
         }
-        Ok(load_method)
+        self.push_bytecode(SpanOf(arr.0, Bytecode::StackToArray(base)));
+        self.push_stack();
+        Ok(())
     }
-    fn gen_object(&mut self, obj: &SpanOf<Vec<Pair>>, store_method: Option<Store>) -> Result<Load> {
-        let store_method = match store_method {
-            Some(s) => s,
-            None if obj.1.is_empty() => return Ok(Load::Object(0)),
-            None => Store::Local(self.push_eval_id()),
-        };
-        self.push_bytecode(SpanOf(
-            obj.0,
-            Bytecode::Move {
-                dst: store_method.clone(),
-                src: Load::Object(obj.1.len()),
-            },
-        ));
-        let load_method = store_method.to_load();
+    fn gen_object(&mut self, obj: &SpanOf<Vec<Pair>>) -> Result<()> {
+        self.push_bytecode(SpanOf(obj.0, Bytecode::LoadObj(obj.1.len())));
+        self.push_bytecode(SpanOf(obj.0, Bytecode::Dup(obj.1.len() + 1)));
+        self.push_stack();
         for pair in obj.1.iter() {
             match pair {
                 Pair::Ident(key, value) => {
-                    let load = self.gen_expr(value, None)?;
-                    let key_str = key.get_str();
+                    self.gen_expr(value)?;
+                    let prop = ValueStr::interned(&key.get_str());
                     self.push_bytecode(SpanOf(
                         key.0.concat(value.span()),
-                        Bytecode::StoreProperty {
-                            dst: load_method.clone(),
-                            src: load,
-                            prop: (&key_str as &str).into(),
-                        },
+                        Bytecode::StoreProperty(prop.clone()),
                     ));
                 }
                 Pair::Index(key, value) => {
-                    let load_key = self.gen_expr(&key.1, None)?;
-                    let load_value = self.gen_expr(value, None)?;
+                    self.gen_expr(&key.1)?;
+                    self.gen_expr(value)?;
                     self.push_bytecode(SpanOf(
                         key.0.concat(value.span()),
-                        Bytecode::StorePropertyIndirect {
-                            dst: load_method.clone(),
-                            src: load_value,
-                            prop: load_key,
-                        },
+                        Bytecode::StorePropertyIndirect,
                     ));
                 }
                 Pair::Unpack(unpack) => {
-                    let load = self.gen_expr(&unpack.1, None)?;
-                    self.push_bytecode(SpanOf(
-                        unpack.0,
-                        Bytecode::StoreProperties {
-                            dst: load_method.clone(),
-                            src: load,
-                        },
-                    ));
+                    self.gen_expr(&unpack.1)?;
+                    self.push_bytecode(SpanOf(unpack.0, Bytecode::MergeObj));
                 }
             }
         }
-        Ok(load_method)
+        Ok(())
     }
-    pub fn gen_expr(&mut self, expr: &Expression, store_method: Option<Store>) -> Result<Load> {
+    pub fn gen_expr(&mut self, expr: &Expression) -> Result<()> {
         match expr {
-            Expression::Nil(span) => match store_method {
-                Some(store_method) => {
-                    self.push_bytecode(SpanOf(
-                        *span,
-                        Bytecode::Move {
-                            dst: store_method.clone(),
-                            src: Load::Nil,
-                        },
-                    ));
-                    Ok(store_method.to_load())
-                }
-                None => Ok(Load::Nil),
-            },
-            Expression::Boolean(bool) => match store_method {
-                Some(store_method) => {
-                    self.push_bytecode(SpanOf(
-                        bool.0,
-                        Bytecode::Move {
-                            dst: store_method.clone(),
-                            src: Load::Bool(bool.1),
-                        },
-                    ));
-                    Ok(store_method.to_load())
-                }
-                None => Ok(Load::Bool(bool.1)),
-            },
-            Expression::Number(n) => match store_method {
-                Some(store_method) => {
-                    self.push_bytecode(SpanOf(
-                        n.0,
-                        Bytecode::Move {
-                            dst: store_method.clone(),
-                            src: Load::Number(n.1.to_f64()),
-                        },
-                    ));
-                    Ok(store_method.to_load())
-                }
-                None => Ok(Load::Number(n.1.to_f64())),
-            },
-            Expression::String(str) => match store_method {
-                Some(store_method) => {
-                    self.push_bytecode(SpanOf(
-                        str.0,
-                        Bytecode::Move {
-                            dst: store_method.clone(),
-                            src: Load::String(str.1.as_str().into()),
-                        },
-                    ));
-                    Ok(store_method.to_load())
-                }
-                None => Ok(Load::String(str.1.as_str().into())),
-            },
+            Expression::Nil(span) => {
+                self.push_stack();
+                self.push_bytecode(SpanOf(*span, Bytecode::LoadNil))
+            }
+            Expression::Boolean(bool) => {
+                self.push_stack();
+                self.push_bytecode(SpanOf(bool.0, Bytecode::LoadBool(bool.1)))
+            }
+            Expression::Number(n) => {
+                self.push_stack();
+                self.push_bytecode(SpanOf(n.0, Bytecode::LoadNum(n.1.to_f64())))
+            }
+            Expression::String(str) => {
+                self.push_stack();
+                self.push_bytecode(SpanOf(str.0, Bytecode::LoadStr(ValueStr::interned(&str.1))))
+            }
             Expression::Closure(closure) => {
                 let sig = self.create_func_sig(closure)?;
-                match store_method {
-                    Some(store) => {
-                        self.push_bytecode(SpanOf(
-                            closure.span(),
-                            Bytecode::Move {
-                                dst: store.clone(),
-                                src: Load::Function(Rc::new(sig)),
-                            },
-                        ));
-                        Ok(store.to_load())
-                    }
-                    None => Ok(Load::Function(Rc::new(sig))),
-                }
+                self.push_stack();
+                self.push_bytecode(SpanOf(closure.span(), Bytecode::LoadFn(Rc::new(sig))));
             }
-            Expression::Array(arr) => self.gen_array(arr, store_method),
-            Expression::Object(obj) => self.gen_object(obj, store_method),
+            Expression::Array(arr) => self.gen_array(arr)?,
+            Expression::Object(obj) => self.gen_object(obj)?,
             Expression::Ident(ident) => {
-                let load_method = self.load_ident((ident.get_str().as_ref() as &str).into());
-                match store_method {
-                    Some(s) => {
-                        self.push_bytecode(SpanOf(
-                            ident.0,
-                            Bytecode::Move {
-                                dst: s.clone(),
-                                src: load_method,
-                            },
-                        ));
-                        Ok(s.to_load())
-                    }
-                    None => Ok(load_method),
-                }
+                let name = ValueStr::interned(&ident.get_str());
+                let bytecode = if let Some(id) = self.get_local_var(name.clone()) {
+                    Bytecode::LoadLocal(id)
+                } else if let Some(id) = self.get_upvalue(name.clone()) {
+                    Bytecode::LoadUpvalue(id)
+                } else {
+                    Bytecode::LoadGlobal(name)
+                };
+                self.push_stack();
+                self.push_bytecode(SpanOf(ident.0, bytecode));
             }
-            Expression::Postfix { operator, operand } => {
-                self.gen_postfix(operand, operator, store_method)
-            }
-            Expression::Prefix { operator, operand } => {
-                self.gen_prefix(operand, operator, store_method)
-            }
+            Expression::Postfix { operator, operand } => self.gen_postfix(operand, operator)?,
+            Expression::Prefix { operator, operand } => self.gen_prefix(operand, operator)?,
             Expression::Binary {
                 left_operand,
                 operator,
                 right_operand,
-            } => self.gen_binary(left_operand, right_operand, operator, store_method),
-            Expression::Assign { assignee, assigner } => {
-                self.gen_assign(assignee, assigner, store_method)
-            }
+            } => self.gen_binary(left_operand, right_operand, operator)?,
+            Expression::Assign { assignee, assigner } => self.gen_assign(assignee, assigner)?,
         }
+        Ok(())
     }
 }
 

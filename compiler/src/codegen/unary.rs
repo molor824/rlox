@@ -45,7 +45,7 @@ impl Codegen {
                     }
                     Some(args) => {
                         let base = self.total_size();
-                        self.last_frame_mut().eval_size += args.len() as LocalId;
+                        self.last_frame_mut().stack_size += args.len() as LocalId;
                         for (i, arg) in args.iter().enumerate() {
                             self.gen_expr(arg, Some(Store::Local(i as LocalId + base)))?;
                         }
