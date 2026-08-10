@@ -1,8 +1,8 @@
 use crate::{
     ast::statement::Statement,
-    codegen::{Codegen, Scope, ScopeKind},
+    codegen::{Codegen, ScopeKind},
     error::{Error, ErrorKind, Result},
-    interpreter::bytecode::{Bytecode, Load},
+    interpreter::bytecode::Bytecode,
     span::{GetSpan, Span, SpanOf},
 };
 
@@ -12,33 +12,32 @@ impl Codegen {
         let f = self.last_frame_mut();
         f.push_scope(kind, loc);
     }
-    fn pop_scope(&mut self) -> Option<Scope> {
+    fn pop_scope(&mut self) {
         let end_loc = self.bytecodes().len();
-        self.last_frame_mut().pop_scope().inspect(|scope| {
-            for break_loc in &scope.break_locs {
-                self.bytecodes_mut()[*break_loc].1 =
-                    Bytecode::Jump(end_loc as isize - *break_loc as isize);
-            }
-            let base_loc = scope.base_loc;
-            for continue_loc in &scope.continue_locs {
-                self.bytecodes_mut()[*continue_loc].1 =
-                    Bytecode::Jump(base_loc as isize - *continue_loc as isize);
-            }
-        })
-    }
-    fn trunc_eval(&mut self) {
-        let f = self.last_frame_mut();
-        f.eval_size = 0;
-        let len = f.total_size();
-        self.push_bytecode(SpanOf(Span::default(), Bytecode::Truncate(len as usize)));
+        let scope = self.last_frame_mut().pop_scope().unwrap();
+
+        for break_loc in &scope.break_locs {
+            self.bytecodes_mut()[*break_loc].1 =
+                Bytecode::Jump(end_loc as isize - *break_loc as isize);
+        }
+        let base_loc = scope.base_loc;
+        for continue_loc in &scope.continue_locs {
+            self.bytecodes_mut()[*continue_loc].1 =
+                Bytecode::Jump(base_loc as isize - *continue_loc as isize);
+        }
+
+        if self.last_frame().locals.len() > scope.base_local_size {
+            self.push_bytecode(SpanOf(
+                Span::default(),
+                Bytecode::Truncate(scope.base_local_size),
+            ));
+            self.last_frame_mut().locals.truncate(scope.base_local_size);
+        }
     }
 
     pub fn gen_statement(&mut self, statement: &Statement) -> Result<()> {
         match statement {
-            Statement::Declaration(decl) => {
-                self.gen_decl(decl)?;
-                self.last_frame_mut().eval_size = 0;
-            }
+            Statement::Declaration(decl) => self.gen_decl(decl)?,
             Statement::If {
                 condition,
                 met_block,
@@ -47,10 +46,11 @@ impl Codegen {
             } => {
                 self.push_scope(ScopeKind::Block);
 
-                let load_cond = self.gen_expr(condition, None)?;
+                self.gen_expr(condition)?;
+                debug_assert_eq!(self.stack_size(), Some(1));
+
                 let br_index = self.bytecodes().len();
-                self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
-                self.last_frame_mut().eval_size = 0;
+                self.push_bytecode(SpanOf(condition.span(), Bytecode::BranchIf(false, 0)));
 
                 for stmt in &met_block.1 {
                     self.gen_statement(stmt)?;
@@ -64,10 +64,9 @@ impl Codegen {
                 });
 
                 let br_until = self.bytecodes().len();
-                self.bytecodes_mut()[br_index].1 = Bytecode::BrFalse {
-                    offset: br_until as isize - br_index as isize,
-                    src: load_cond,
-                };
+                self.bytecodes_mut()[br_index].1 =
+                    Bytecode::BranchIf(false, br_until as isize - br_index as isize);
+
                 if let Some(e) = else_block.as_ref() {
                     for stmt in &e.1 {
                         self.gen_statement(stmt)?;
@@ -81,7 +80,6 @@ impl Codegen {
                 }
 
                 self.pop_scope();
-                self.trunc_eval();
             }
             Statement::While {
                 condition, block, ..
@@ -90,10 +88,11 @@ impl Codegen {
 
                 let continue_at = self.bytecodes().len();
 
-                let load_cond = self.gen_expr(condition, None)?;
-                let skip_start = self.bytecodes().len();
-                self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
-                self.last_frame_mut().eval_size = 0;
+                self.gen_expr(condition)?;
+                debug_assert_eq!(self.stack_size(), Some(1));
+
+                let break_start = self.bytecodes().len();
+                self.push_bytecode(SpanOf(condition.span(), Bytecode::BranchIf(false, 0)));
 
                 for stmt in &block.1 {
                     self.gen_statement(stmt)?;
@@ -105,14 +104,11 @@ impl Codegen {
                     Bytecode::Jump(continue_at as isize - continue_from as isize),
                 ));
 
-                let skip_until = self.bytecodes().len();
-                self.bytecodes_mut()[skip_start].1 = Bytecode::BrFalse {
-                    offset: skip_until as isize - skip_start as isize,
-                    src: load_cond,
-                };
+                let break_until = self.bytecodes().len();
+                self.bytecodes_mut()[break_start].1 =
+                    Bytecode::BranchIf(false, break_until as isize - break_start as isize);
 
                 self.pop_scope();
-                self.trunc_eval();
             }
             Statement::Break(span) | Statement::Continue(span) => {
                 let Some(loop_idx) = self
@@ -139,14 +135,14 @@ impl Codegen {
                 }
             }
             Statement::Return(expr) => {
-                let load = match &expr.1 {
-                    Some(expr) => self.gen_expr(expr, None)?,
-                    None => Load::Nil,
-                };
-                self.push_bytecode(SpanOf(expr.0, Bytecode::Return(load)));
+                if let Some(expr) = &expr.1 {
+                    self.gen_expr(expr)?;
+                }
+                self.push_bytecode(SpanOf(expr.0, Bytecode::Return));
             }
             _ => todo!(),
         }
+        debug_assert_eq!(self.stack_size(), Some(0));
         Ok(())
     }
 }
@@ -175,8 +171,46 @@ mod tests {
             codegen.gen_statement(&stmt).unwrap();
         }
 
-        for bc in codegen.bytecodes() {
+        let expected = r#"GlobalDeclare("i")
+            LoadNum(0.0)
+            StoreGlobal("i")
+            GlobalDeclare("j")
+            LoadNum(30.0)
+            StoreGlobal("j")
+            LoadBool(true)
+            BranchIf(false, 26)
+            LoadGlobal("i")
+            LoadGlobal("j")
+            Binary(SetEq)
+            BranchIf(false, 2)
+            Jump(-6)
+            LoadGlobal("i")
+            LoadNum(2.0)
+            Binary(Pow)
+            LoadGlobal("j")
+            Binary(SetEq)
+            BranchIf(false, 2)
+            Jump(14)
+            LoadGlobal("i")
+            LoadNum(1.0)
+            Binary(Add)
+            Dup(2)
+            StoreGlobal("i")
+            Dup(0)
+            LoadGlobal("j")
+            LoadNum(20.0)
+            Binary(Add)
+            Dup(2)
+            StoreGlobal("j")
+            Dup(0)
+            Jump(-26)"#
+            .split("\n")
+            .map(str::trim)
+            .collect::<Vec<_>>();
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(expected, format!("{:?}", bc.1));
         }
     }
     #[test]
@@ -199,8 +233,49 @@ mod tests {
             .gen_statement(&parser.next_statement().unwrap().unwrap())
             .unwrap();
 
-        for bc in codegen.bytecodes() {
+        let expected = r#"LoadGlobal("n")
+            LoadNum(6.0)
+            Binary(Rem)
+            LoadNum(0.0)
+            Binary(SetEq)
+            BranchIf(false, 6)
+            LoadGlobal("print")
+            LoadStr("fizz buzz")
+            Call(0)
+            Dup(0)
+            Jump(26)
+            LoadGlobal("n")
+            LoadNum(2.0)
+            Binary(Rem)
+            LoadNum(0.0)
+            Binary(SetEq)
+            BranchIf(false, 6)
+            LoadGlobal("print")
+            LoadStr("fizz")
+            Call(0)
+            Dup(0)
+            Jump(15)
+            LoadGlobal("n")
+            LoadNum(3.0)
+            Binary(Rem)
+            LoadNum(0.0)
+            Binary(SetEq)
+            BranchIf(false, 6)
+            LoadGlobal("print")
+            LoadStr("buzz")
+            Call(0)
+            Dup(0)
+            Jump(4)
+            LoadGlobal("print")
+            Call(0)
+            Dup(0)"#
+            .split("\n")
+            .map(str::trim)
+            .collect::<Vec<_>>();
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(expected, format!("{:?}", bc.1));
         }
     }
 }

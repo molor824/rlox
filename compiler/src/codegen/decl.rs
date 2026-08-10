@@ -7,21 +7,23 @@ use crate::{
     },
     codegen::Codegen,
     error::Result,
-    interpreter::{
-        bytecode::{Bytecode, Load, Store},
-        string::ValueStr,
-        FnBody, FnSignature,
-    },
+    interpreter::{bytecode::Bytecode, string::ValueStr, FnBody, FnSignature},
     span::{GetSpan, SpanOf},
 };
 
 impl Codegen {
     pub fn gen_decl(&mut self, declaration: &Declaration) -> Result<()> {
         match declaration {
-            Declaration::VarDecl(decl) => self.gen_var_decl(decl),
-            Declaration::FuncDecl(decl) => self.gen_func_decl(decl),
-            Declaration::Expression(expr) => self.gen_expr(expr, Some(Store::Nil)).map(|_| ()),
+            Declaration::VarDecl(decl) => self.gen_var_decl(decl)?,
+            Declaration::FuncDecl(decl) => self.gen_func_decl(decl)?,
+            Declaration::Expression(expr) => {
+                self.gen_expr(expr)?;
+                debug_assert_eq!(self.stack_size(), Some(1));
+                self.push_bytecode(SpanOf(expr.span(), Bytecode::Dup(0)));
+            }
         }
+        debug_assert_eq!(self.stack_size(), Some(0));
+        Ok(())
     }
     pub(crate) fn create_func_sig(&mut self, decl: &Closure) -> Result<FnSignature> {
         self.push_frame();
@@ -44,8 +46,9 @@ impl Codegen {
                 }
             }
             FunctionBody::Expression(expr) => {
-                let load = self.gen_expr(expr, None)?;
-                self.push_bytecode(SpanOf(expr.span(), Bytecode::Return(load)));
+                self.gen_expr(expr)?;
+                self.push_bytecode(SpanOf(expr.span(), Bytecode::Return));
+                debug_assert_eq!(self.stack_size(), Some(0));
             }
         }
 
@@ -62,11 +65,8 @@ impl Codegen {
         // pre-declare the function name to allow recursion
         // function declaration is const by default
         let name = ValueStr::interned(&decl.ident.get_str());
-        let store_method = match self.decl_local(name.clone()) {
-            Some(id) => Store::Local(id),
-            None => Store::Global(name),
-        };
-        if let Store::Global(name) = &store_method {
+        let decl_id = self.decl_local(name.clone());
+        if decl_id.is_none() {
             self.push_bytecode(SpanOf(
                 decl.fn_keyword,
                 Bytecode::GlobalDeclare(name.clone()),
@@ -74,39 +74,45 @@ impl Codegen {
         }
 
         let sig = self.create_func_sig(&decl.closure)?;
+        self.push_bytecode(SpanOf(decl.closure.span(), Bytecode::LoadFn(Rc::new(sig))));
+        debug_assert_eq!(self.stack_size(), Some(1));
         self.push_bytecode(SpanOf(
-            decl.closure.span(),
-            Bytecode::Move {
-                dst: store_method.clone(),
-                src: Load::Function(Rc::new(sig)),
+            decl.span(),
+            match decl_id {
+                Some(id) => Bytecode::StoreLocal(id),
+                None => Bytecode::StoreGlobal(name.clone()),
             },
         ));
 
         // mark constant
-        match store_method {
-            Store::Global(name) => {
-                self.push_bytecode(SpanOf(decl.span(), Bytecode::GlobalReadOnly(name)))
-            }
-            // TODO: Implement compile time const check for local variables!
-            _ => {}
+        if decl_id.is_none() {
+            self.push_bytecode(SpanOf(decl.fn_keyword, Bytecode::GlobalReadOnly(name)));
         }
 
         Ok(())
     }
     pub(crate) fn gen_var_decl(&mut self, decl: &VarDecl) -> Result<()> {
         let name = ValueStr::interned(&decl.ident.get_str());
-        let var_store_method = match self.decl_local(name.clone()) {
-            Some(id) => Store::Local(id),
-            None => Store::Global(name),
-        };
-        if let Store::Global(name) = var_store_method.clone() {
-            self.push_bytecode(SpanOf(decl.keyword.0, Bytecode::GlobalDeclare(name)));
+        let decl_id = self.decl_local(name.clone());
+        if decl_id.is_none() {
+            self.push_bytecode(SpanOf(
+                decl.keyword.0,
+                Bytecode::GlobalDeclare(name.clone()),
+            ));
         }
 
-        self.gen_expr(&decl.assigner, Some(var_store_method.clone()))?;
+        self.gen_expr(&decl.assigner)?;
+        debug_assert_eq!(self.stack_size(), Some(1));
+        self.push_bytecode(SpanOf(
+            decl.span(),
+            match decl_id {
+                Some(id) => Bytecode::StoreLocal(id),
+                None => Bytecode::StoreGlobal(name.clone()),
+            },
+        ));
 
         // TODO: Implement compile-time constant check for local variables!
-        if let Store::Global(name) = var_store_method {
+        if decl_id.is_none() {
             if &*decl.keyword.get_str() == "const" {
                 self.push_bytecode(SpanOf(decl.keyword.0, Bytecode::GlobalReadOnly(name)));
             }
@@ -117,7 +123,17 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use std::rc::Rc;
+
+    use crate::{
+        ast::Parser,
+        codegen::Codegen,
+        interpreter::{
+            bytecode::{BinaryOp, Bytecode},
+            FnBody, FnSignature,
+        },
+        span::{Span, SpanOf},
+    };
 
     #[test]
     fn test_decl() {
@@ -129,7 +145,7 @@ const vec2_base = {
     sqr_len: \self -> self.x ** 2 + self.y ** 2,
     len: \self -> sqrt(self:sqr_len()),
 }
-fn vector2(x, y) base({x, y}, vec2_base)
+fn vector2(x, y) setbase({x, y}, vec2_base)
             "#
             .as_bytes(),
         );
@@ -139,8 +155,88 @@ fn vector2(x, y) base({x, y}, vec2_base)
             codegen.gen_statement(&stmt).unwrap();
         }
 
-        for bc in codegen.bytecodes() {
+        let expected = [
+            Bytecode::GlobalDeclare("vec2_base".into()),
+            Bytecode::LoadObj(4),
+            Bytecode::Dup(5),
+            Bytecode::LoadNum(0.0),
+            Bytecode::StoreProperty("x".into()),
+            Bytecode::LoadNum(0.0),
+            Bytecode::StoreProperty("y".into()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 1,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadLocal(0),
+                        Bytecode::LoadProperty("x".into()),
+                        Bytecode::LoadNum(2.0),
+                        Bytecode::Binary(BinaryOp::Pow),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::LoadProperty("y".into()),
+                        Bytecode::LoadNum(2.0),
+                        Bytecode::Binary(BinaryOp::Pow),
+                        Bytecode::Binary(BinaryOp::Add),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreProperty("sqr_len".into()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 1,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadGlobal("sqrt".into()),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::LoadMethod("sqr_len".into()),
+                        Bytecode::Call(1),
+                        Bytecode::Call(0),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreProperty("len".into()),
+            Bytecode::StoreGlobal("vec2_base".into()),
+            Bytecode::GlobalReadOnly("vec2_base".into()),
+            Bytecode::GlobalDeclare("vector2".into()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 2,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadGlobal("setbase".into()),
+                        Bytecode::LoadObj(2),
+                        Bytecode::Dup(3),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::StoreProperty("x".into()),
+                        Bytecode::LoadLocal(1),
+                        Bytecode::StoreProperty("y".into()),
+                        Bytecode::LoadGlobal("vec2_base".into()),
+                        Bytecode::Call(0),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreGlobal("vector2".into()),
+            Bytecode::GlobalReadOnly("vector2".into()),
+        ];
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }

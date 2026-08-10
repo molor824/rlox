@@ -301,7 +301,7 @@ impl Value {
             _ => error(),
         }
     }
-    pub fn try_inv(&self) -> Result<Value, ErrorKind> {
+    pub fn try_swap(&self) -> Result<Value, ErrorKind> {
         let error = || Err(ErrorKind::InvalidUnary("~", self.type_str()));
         match self {
             Self::Number(n) => Ok(Self::Number(!(*n as i64) as f64)),
@@ -368,7 +368,7 @@ impl Value {
             _ => Err(ErrorKind::InvalidType(self.type_str(), "number")),
         }
     }
-    pub fn as_callable(&self) -> Result<Rc<Function>, ErrorKind> {
+    pub fn try_function(&self) -> Result<Rc<Function>, ErrorKind> {
         match self {
             Self::Function(fun) => Ok(fun.clone()),
             _ => Err(ErrorKind::InvalidType(self.type_str(), "function")),

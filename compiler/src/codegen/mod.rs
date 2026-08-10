@@ -1,11 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    interpreter::{
-        bytecode::{Bytecode, Load, Store},
-        string::ValueStr,
-        FnBody, FnSignature, LocalId, UpvalueLoc,
-    },
+    interpreter::{bytecode::Bytecode, string::ValueStr, FnBody, FnSignature, UpvalueLoc},
     span::SpanOf,
 };
 
@@ -23,56 +19,53 @@ enum ScopeKind {
 struct Scope {
     kind: ScopeKind,
     base_loc: usize,
-    base_local_size: LocalId, // Evaluation size recorded before the scope creation
-    break_locs: Vec<usize>,   // bytecode locations at which break statements occurred
+    base_local_size: usize, // local memory size recorded before the scope creation
+    break_locs: Vec<usize>, // bytecode locations at which break statements occurred
     continue_locs: Vec<usize>, // bytecode locations at which continue statements occurred
 }
-#[derive(Default)]
 struct FnFrame {
     locals: Vec<ValueStr>,
     scopes: Vec<Scope>,
-    eval_size: LocalId,
+    stack_size: Option<usize>, // try to predict, however prediction can fail throughout the generation for iterator unpacking bytecode
     upvalues: Vec<(ValueStr, UpvalueLoc)>,
     bytecodes: Vec<SpanOf<Bytecode>>,
 }
+impl Default for FnFrame {
+    fn default() -> Self {
+        Self {
+            locals: vec![],
+            scopes: vec![],
+            stack_size: Some(0),
+            upvalues: vec![],
+            bytecodes: vec![],
+        }
+    }
+}
 impl FnFrame {
-    fn get_upvalue(&self, name: ValueStr) -> Option<LocalId> {
-        self.upvalues
-            .iter()
-            .rposition(|n| n.0 == name)
-            .map(|i| i as LocalId)
+    fn get_upvalue(&self, name: ValueStr) -> Option<usize> {
+        self.upvalues.iter().rposition(|n| n.0 == name)
     }
-    fn get_local_var(&self, name: ValueStr) -> Option<LocalId> {
-        self.locals
-            .iter()
-            .rposition(|n| *n == name)
-            .map(|i| i as LocalId)
+    fn get_local_var(&self, name: ValueStr) -> Option<usize> {
+        self.locals.iter().rposition(|n| *n == name)
     }
-    fn decl_local(&mut self, name: ValueStr) -> LocalId {
-        assert_eq!(self.eval_size, 0);
+    fn decl_local(&mut self, name: ValueStr) -> usize {
         let id = self.locals.len();
         self.locals.push(name);
-        id as LocalId
+        id
     }
     fn push_scope(&mut self, kind: ScopeKind, base_loc: usize) {
-        assert_eq!(self.eval_size, 0);
         self.scopes.push(Scope {
             kind,
             base_loc,
-            base_local_size: self.locals.len() as LocalId,
+            base_local_size: self.locals.len(),
             break_locs: vec![],
             continue_locs: vec![],
         });
     }
     fn pop_scope(&mut self) -> Option<Scope> {
-        assert_eq!(self.eval_size, 0);
-        self.scopes.pop().inspect(|s| {
-            self.locals.truncate(s.base_local_size as usize);
-            self.eval_size = s.base_local_size - self.locals.len() as LocalId;
-        })
-    }
-    fn total_size(&self) -> LocalId {
-        self.locals.len() as LocalId + self.eval_size
+        self.scopes
+            .pop()
+            .inspect(|s| self.locals.truncate(s.base_local_size))
     }
 }
 
@@ -96,19 +89,15 @@ impl Codegen {
         self.frames.last_mut().unwrap_or(&mut self.global_frame)
     }
     fn push_frame(&mut self) {
-        self.frames.push(FnFrame {
-            locals: vec![],
-            scopes: vec![],
-            eval_size: 0,
-            upvalues: vec![],
-            bytecodes: vec![],
-        });
+        self.frames.push(FnFrame::default());
     }
     fn pop_frame(&mut self) -> Option<FnFrame> {
         self.frames.pop()
     }
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
-        self.last_frame_mut().bytecodes.push(bytecode);
+        let frame = self.last_frame_mut();
+        frame.stack_size = Self::next_stack(&bytecode.1, frame.stack_size);
+        frame.bytecodes.push(bytecode);
     }
     pub fn bytecodes(&self) -> &[SpanOf<Bytecode>] {
         &self.last_frame().bytecodes
@@ -116,7 +105,7 @@ impl Codegen {
     fn bytecodes_mut(&mut self) -> &mut [SpanOf<Bytecode>] {
         &mut self.last_frame_mut().bytecodes
     }
-    fn decl_local(&mut self, name: ValueStr) -> Option<LocalId> {
+    fn decl_local(&mut self, name: ValueStr) -> Option<usize> {
         match self.frames.last_mut() {
             Some(f) => Some(f.decl_local(name)),
             None if !self.global_frame.scopes.is_empty() => {
@@ -125,40 +114,16 @@ impl Codegen {
             _ => None,
         }
     }
-    fn store_ident(&mut self, name: ValueStr) -> Store {
-        if let Some(id) = self.get_local_var(name.clone()) {
-            Store::Local(id)
-        } else if let Some(id) = self.get_upvalue(name.clone()) {
-            Store::Upvalue(id)
-        } else {
-            Store::Global(name)
-        }
+    fn stack_size(&self) -> Option<usize> {
+        self.last_frame().stack_size
     }
-    fn load_ident(&mut self, name: ValueStr) -> Load {
-        if let Some(id) = self.get_local_var(name.clone()) {
-            Load::Local(id)
-        } else if let Some(id) = self.get_upvalue(name.clone()) {
-            Load::Upvalue(id)
-        } else {
-            Load::Global(name)
-        }
-    }
-    fn total_size(&self) -> LocalId {
-        self.last_frame().total_size()
-    }
-    fn push_eval_id(&mut self) -> LocalId {
-        let f = self.last_frame_mut();
-        let id = f.eval_size + f.locals.len() as LocalId;
-        f.eval_size += 1;
-        id
-    }
-    fn get_local_var(&self, name: ValueStr) -> Option<LocalId> {
+    fn get_local_var(&self, name: ValueStr) -> Option<usize> {
         self.last_frame().get_local_var(name)
     }
-    fn get_upvalue(&mut self, name: ValueStr) -> Option<LocalId> {
+    fn get_upvalue(&mut self, name: ValueStr) -> Option<usize> {
         let f = self.frames.last_mut()?;
         if let Some(idx) = f.get_upvalue(name.clone()) {
-            Some(idx as LocalId)
+            Some(idx)
         } else {
             for idx in (0..(self.frames.len() - 1)).rev() {
                 if let Some(mut id) = self.frames[idx].get_upvalue(name.clone()) {
@@ -166,7 +131,7 @@ impl Codegen {
                     for i in (idx + 1)..self.frames.len() {
                         let f = &mut self.frames[i];
                         f.upvalues.push((name.clone(), UpvalueLoc::Shared(id)));
-                        id = f.upvalues.len() as LocalId - 1;
+                        id = f.upvalues.len() - 1;
                     }
                     return Some(id);
                 }
@@ -175,11 +140,11 @@ impl Codegen {
                     let f = &mut self.frames[idx + 1];
                     f.upvalues.push((name.clone(), UpvalueLoc::Local(id)));
                     // now propagate inner by each parent frame's indices
-                    id = f.upvalues.len() as LocalId - 1;
+                    id = f.upvalues.len() - 1;
                     for i in (idx + 2)..self.frames.len() {
                         let f = &mut self.frames[i];
                         f.upvalues.push((name.clone(), UpvalueLoc::Shared(id)));
-                        id = f.upvalues.len() as LocalId - 1;
+                        id = f.upvalues.len() - 1;
                     }
                     return Some(id);
                 }
@@ -197,11 +162,55 @@ impl Codegen {
             body: FnBody::Bytecode(frame.bytecodes),
         }
     }
+    pub fn next_stack(bc: &Bytecode, stack: Option<usize>) -> Option<usize> {
+        match bc {
+            Bytecode::Call(base) | Bytecode::StackToArray(base) => Some(*base + 1),
+            Bytecode::Dup(n) => stack.map(|s| s - 1 + *n),
+            Bytecode::LoadBool(..)
+            | Bytecode::LoadFn(..)
+            | Bytecode::LoadGlobal(..)
+            | Bytecode::LoadLocal(..)
+            | Bytecode::LoadNil
+            | Bytecode::LoadNum(..)
+            | Bytecode::LoadObj(..)
+            | Bytecode::LoadStr(..)
+            | Bytecode::LoadUpvalue(..) => stack.map(|s| s + 1),
+            Bytecode::StoreGlobal(..)
+            | Bytecode::StoreLocal(..)
+            | Bytecode::StoreUpvalue(..)
+            | Bytecode::Return
+            | Bytecode::Binary(..)
+            | Bytecode::BranchIf(..)
+            | Bytecode::LoadPropertyIndirect => stack.map(|s| s - 1),
+            Bytecode::MergeObj | Bytecode::StoreProperty(..) => stack.map(|s| s - 2),
+            Bytecode::StorePropertyIndirect => stack.map(|s| s - 3),
+            Bytecode::Truncate(..)
+            | Bytecode::Nop
+            | Bytecode::Jump(..)
+            | Bytecode::GlobalDeclare(..)
+            | Bytecode::GlobalReadOnly(..)
+            | Bytecode::Unary(..)
+            | Bytecode::LoadProperty(..)
+            | Bytecode::LoadMethod(..) => stack,
+            Bytecode::UnpackIter => None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use std::rc::Rc;
+
+    use crate::{
+        ast::Parser,
+        codegen::Codegen,
+        interpreter::{
+            bytecode::{BinaryOp, Bytecode},
+            string::ValueStr,
+            FnBody, FnSignature,
+        },
+        span::{Span, SpanOf},
+    };
 
     #[test]
     fn test_codegen() {
@@ -227,8 +236,59 @@ mod tests {
             .gen_statement(&parser.next_statement().unwrap().unwrap())
             .unwrap();
 
-        for bc in codegen.bytecodes() {
+        let fib = ValueStr::interned("fib");
+        let expected = [
+            Bytecode::GlobalDeclare(fib.clone()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 1,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadNum(0.0),
+                        Bytecode::StoreLocal(1),
+                        Bytecode::LoadNum(1.0),
+                        Bytecode::StoreLocal(2),
+                        Bytecode::LoadNum(0.0),
+                        Bytecode::StoreLocal(3),
+                        Bytecode::LoadLocal(3),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::Binary(BinaryOp::SetLt),
+                        Bytecode::BranchIf(false, 20),
+                        Bytecode::LoadLocal(1),
+                        Bytecode::LoadLocal(2),
+                        Bytecode::Binary(BinaryOp::Add),
+                        Bytecode::StoreLocal(4),
+                        Bytecode::LoadLocal(2),
+                        Bytecode::Dup(2),
+                        Bytecode::StoreLocal(1),
+                        Bytecode::Dup(0),
+                        Bytecode::LoadLocal(4),
+                        Bytecode::Dup(2),
+                        Bytecode::StoreLocal(2),
+                        Bytecode::Dup(0),
+                        Bytecode::LoadLocal(3),
+                        Bytecode::LoadNum(1.0),
+                        Bytecode::Binary(BinaryOp::Add),
+                        Bytecode::Dup(2),
+                        Bytecode::StoreLocal(3),
+                        Bytecode::Dup(0),
+                        Bytecode::Jump(-22),
+                        Bytecode::LoadLocal(3),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreGlobal(fib.clone()),
+            Bytecode::GlobalReadOnly(fib),
+        ];
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }
