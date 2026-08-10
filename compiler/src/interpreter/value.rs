@@ -72,11 +72,14 @@ pub struct Function {
 
 #[derive(Debug)]
 pub struct Object {
-    pub map: FxHashMap<ValueStr, Value>,
+    pub map: FxHashMap<Value, Value>,
     pub base_obj: Option<Rc<RefCell<Object>>>,
 }
 impl Object {
-    pub fn new(map: FxHashMap<ValueStr, Value>) -> Result<Self, ErrorKind> {
+    pub fn new(map: FxHashMap<Value, Value>) -> Result<Self, ErrorKind> {
+        for k in map.keys() {
+            Self::validate_key(&k)?;
+        }
         Ok(Self {
             map,
             base_obj: None,
@@ -88,7 +91,8 @@ impl Object {
             base_obj: None,
         }
     }
-    pub fn get_property(&self, key: &ValueStr) -> Result<Value, ErrorKind> {
+    pub fn get_property(&self, key: &Value) -> Result<Value, ErrorKind> {
+        Self::validate_key(&key)?;
         if let Some(value) = self.map.get(key) {
             Ok(value.clone())
         } else if let Some(super_obj) = &self.base_obj {
@@ -97,13 +101,21 @@ impl Object {
             Ok(Value::Nil)
         }
     }
-    pub fn set_property(&mut self, key: ValueStr, new_value: Value) -> Result<(), ErrorKind> {
+    pub fn set_property(&mut self, key: Value, new_value: Value) -> Result<(), ErrorKind> {
+        Self::validate_key(&key)?;
         if matches!(new_value, Value::Nil) {
             self.map.remove(&key);
             return Ok(());
         }
         self.map.insert(key, new_value);
         Ok(())
+    }
+    fn validate_key(key: &Value) -> Result<(), ErrorKind> {
+        match key {
+            Value::Nil => Err(ErrorKind::NilIndexing),
+            Value::Number(n) if n.is_nan() || n.is_infinite() => Err(ErrorKind::NanIndexing),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -170,21 +182,39 @@ impl Value {
             v => Err(ErrorKind::InvalidType(v.type_str(), "object")),
         }
     }
-    pub fn try_iterator(self) -> Result<Box<dyn Iterator<Item = Value>>, ErrorKind> {
+    pub fn try_iterator(
+        self,
+        // interpreter: &mut Interpreter,
+    ) -> Result<Box<dyn Iterator<Item = Result<Value, ErrorKind>>>, ErrorKind> {
         match self {
-            Self::Array(arr) => Ok(Box::new(arr.borrow().clone().into_iter())),
+            Self::Array(arr) => {
+                let len = arr.borrow().len();
+                let mut index = 0;
+                Ok(Box::new(std::iter::from_fn(move || {
+                    if index >= len {
+                        return None;
+                    }
+                    let i = index;
+                    index += 1;
+                    Some(Ok(arr.borrow().get(i).cloned().unwrap_or_default()))
+                })))
+            }
             Self::Object(obj) => Ok(Box::new(
                 obj.borrow()
                     .map
-                    .iter()
-                    .map(|(k, v)| {
-                        Value::Array(Rc::new(RefCell::new(vec![
-                            Value::String(k.clone()),
-                            v.clone(),
-                        ])))
-                    })
+                    .keys()
+                    .cloned()
                     .collect::<Vec<_>>()
-                    .into_iter(),
+                    .into_iter()
+                    .map({
+                        let obj1 = obj.clone();
+                        move |k| {
+                            Ok(Value::Array(Rc::new(RefCell::new(vec![
+                                k.clone(),
+                                obj1.borrow().get_property(&k)?,
+                            ]))))
+                        }
+                    }),
             )),
             Self::String(str) => {
                 let mut idx = 0;
@@ -195,10 +225,13 @@ impl Value {
                         idx += ch.len_utf8();
                         let mut buffer = [0u8; 4];
 
-                        Value::String(ValueStr::from(ch.encode_utf8(&mut buffer) as &str))
+                        Ok(Value::String(ValueStr::from(
+                            ch.encode_utf8(&mut buffer) as &str
+                        )))
                     })
                 })))
             }
+            Self::Function(..) => todo!("Make try_iterator use interpreter's lifetime instead and remove it's usage in iter() built-in method"),
             _ => Err(ErrorKind::UniterableType(self.type_str())),
         }
     }
@@ -340,7 +373,7 @@ impl Value {
                     .unwrap_or_default()),
                 _ => Err(ErrorKind::InvalidArrayIndex),
             },
-            Self::Object(obj) => Ok(obj.borrow().get_property(&key.try_str()?)?),
+            Self::Object(obj) => Ok(obj.borrow().get_property(&key)?),
             _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }
@@ -358,7 +391,7 @@ impl Value {
                 }
                 _ => Err(ErrorKind::InvalidArrayIndex),
             },
-            Self::Object(obj) => Ok(obj.borrow_mut().set_property(key.try_str()?, new_value)?),
+            Self::Object(obj) => Ok(obj.borrow_mut().set_property(key, new_value)?),
             _ => Err(ErrorKind::InvalidPropertyAccess),
         }
     }

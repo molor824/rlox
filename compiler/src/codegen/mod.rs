@@ -63,9 +63,7 @@ impl FnFrame {
         });
     }
     fn pop_scope(&mut self) -> Option<Scope> {
-        self.scopes
-            .pop()
-            .inspect(|s| self.locals.truncate(s.base_local_size))
+        self.scopes.pop()
     }
 }
 
@@ -164,7 +162,10 @@ impl Codegen {
     }
     pub fn next_stack(bc: &Bytecode, stack: Option<usize>) -> Option<usize> {
         match bc {
-            Bytecode::Call(base) | Bytecode::StackToArray(base) => Some(*base + 1),
+            Bytecode::Call(base)
+            | Bytecode::StackToArray(base)
+            | Bytecode::StackToObj(base)
+            | Bytecode::CallBuiltin(base, _) => Some(*base + 1),
             Bytecode::Dup(n) => stack.map(|s| s - 1 + *n),
             Bytecode::LoadBool(..)
             | Bytecode::LoadFn(..)
@@ -172,7 +173,6 @@ impl Codegen {
             | Bytecode::LoadLocal(..)
             | Bytecode::LoadNil
             | Bytecode::LoadNum(..)
-            | Bytecode::LoadObj(..)
             | Bytecode::LoadStr(..)
             | Bytecode::LoadUpvalue(..) => stack.map(|s| s + 1),
             Bytecode::StoreGlobal(..)
@@ -182,7 +182,7 @@ impl Codegen {
             | Bytecode::Binary(..)
             | Bytecode::BranchIf(..)
             | Bytecode::LoadPropertyIndirect => stack.map(|s| s - 1),
-            Bytecode::MergeObj | Bytecode::StoreProperty(..) => stack.map(|s| s - 2),
+            Bytecode::StoreProperty(..) => stack.map(|s| s - 2),
             Bytecode::StorePropertyIndirect => stack.map(|s| s - 3),
             Bytecode::Truncate(..)
             | Bytecode::Nop
@@ -192,7 +192,7 @@ impl Codegen {
             | Bytecode::Unary(..)
             | Bytecode::LoadProperty(..)
             | Bytecode::LoadMethod(..) => stack,
-            Bytecode::UnpackIter => None,
+            Bytecode::UnpackIter | Bytecode::UnpackPairIter => None,
         }
     }
 }
@@ -274,6 +274,7 @@ mod tests {
                         Bytecode::StoreLocal(3),
                         Bytecode::Dup(0),
                         Bytecode::Jump(-22),
+                        Bytecode::Truncate(4),
                         Bytecode::LoadLocal(3),
                         Bytecode::Return,
                     ]

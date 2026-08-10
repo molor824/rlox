@@ -26,32 +26,27 @@ impl Codegen {
         Ok(())
     }
     fn gen_object(&mut self, obj: &SpanOf<Vec<Pair>>) -> Result<()> {
-        self.push_bytecode(SpanOf(obj.0, Bytecode::LoadObj(obj.1.len())));
-        self.push_bytecode(SpanOf(obj.0, Bytecode::Dup(obj.1.len() + 1)));
+        let base = self.stack_size().expect("Stack unpredictable.");
         for pair in obj.1.iter() {
             match pair {
                 Pair::Ident(key, value) => {
-                    self.gen_expr(value)?;
-                    let prop = ValueStr::interned(&key.get_str());
                     self.push_bytecode(SpanOf(
-                        key.0.concat(value.span()),
-                        Bytecode::StoreProperty(prop.clone()),
+                        key.0,
+                        Bytecode::LoadStr(ValueStr::interned(&key.get_str())),
                     ));
+                    self.gen_expr(value)?;
                 }
                 Pair::Index(key, value) => {
                     self.gen_expr(&key.1)?;
                     self.gen_expr(value)?;
-                    self.push_bytecode(SpanOf(
-                        key.0.concat(value.span()),
-                        Bytecode::StorePropertyIndirect,
-                    ));
                 }
                 Pair::Unpack(unpack) => {
                     self.gen_expr(&unpack.1)?;
-                    self.push_bytecode(SpanOf(unpack.0, Bytecode::MergeObj));
+                    self.push_bytecode(SpanOf(unpack.0, Bytecode::UnpackPairIter));
                 }
             }
         }
+        self.push_bytecode(SpanOf(obj.0, Bytecode::StackToObj(base)));
         Ok(())
     }
     pub fn gen_expr(&mut self, expr: &Expression) -> Result<()> {

@@ -70,7 +70,7 @@ pub enum ErrorKind {
     UniterableType(&'static str),
     #[error("Cannot index with nil value")]
     NilIndexing,
-    #[error("Cannot index with nan value")]
+    #[error("Cannot index with nan or inf value")]
     NanIndexing,
     #[error("Attempted to write to read-only global `{0}`")]
     ConstGlobal(ValueStr),
@@ -84,8 +84,6 @@ pub enum ErrorKind {
     InvalidArrayIndex,
     #[error("Attempted to access property of value whose type is not object or array")]
     InvalidPropertyAccess,
-    #[error("Attempted to access property of nil, NaN, or infinite values")]
-    IllegalPropertyAccess,
     #[error("Attempted to access non-existent upvalue")]
     InvalidUpvalueAccess,
     #[error("Attempted to access upvalue in global scope")]

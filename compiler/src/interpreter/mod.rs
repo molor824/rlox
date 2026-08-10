@@ -9,7 +9,7 @@ use crate::interpreter::{bytecode::Bytecode, value::Function, value::Value};
 use crate::span::SpanOf;
 use rustc_hash::FxHashMap;
 
-mod builtin;
+pub mod builtin;
 pub mod bytecode;
 pub mod string;
 pub mod value;
@@ -41,7 +41,7 @@ impl FnSignature {
 
 pub enum FnBody {
     Bytecode(Vec<SpanOf<Bytecode>>),
-    Builtin(Box<dyn Fn(&mut Interpreter) -> Result<Value, ErrorKind>>),
+    Builtin(Box<RefCell<dyn FnMut(&mut Interpreter) -> Result<Value, ErrorKind>>>),
 }
 impl fmt::Debug for FnBody {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -53,10 +53,7 @@ impl fmt::Debug for FnBody {
                 }
                 write!(f, "]")
             }
-            Self::Builtin(builtin) => f
-                .debug_tuple("Builtin")
-                .field(&(builtin.as_ref() as *const _))
-                .finish(),
+            Self::Builtin(..) => f.debug_tuple("Builtin").field(&"..").finish(),
         }
     }
 }
@@ -82,27 +79,12 @@ pub struct Interpreter {
 }
 impl Default for Interpreter {
     fn default() -> Self {
-        let globals = builtin::GLOBALS
-            .iter()
-            .cloned()
-            .map(|(name, arity, variadic, body)| {
-                (
-                    ValueStr::interned(name),
-                    (
-                        Value::Function(Rc::new(Function {
-                            signature: Rc::new(FnSignature {
-                                arity,
-                                variadic,
-                                upvalues: vec![],
-                                body: FnBody::Builtin(Box::new(body)),
-                            }),
-                            upvalues: vec![],
-                        })),
-                        true,
-                    ),
-                )
-            })
-            .collect::<FxHashMap<_, _>>();
+        let globals = builtin::GLOBALS.with(|globals| {
+            globals
+                .iter()
+                .map(|(name, function)| (name.clone(), (Value::Function(function.clone()), true)))
+                .collect()
+        });
         Self {
             memory: Vec::with_capacity(INIT_MEM_SIZE),
             stack: Vec::new(),
@@ -209,17 +191,16 @@ impl Interpreter {
             interpreter.set_local(arity, itself.clone());
             interpreter.memory[base_pointer..].rotate_right(1);
             interpreter.call_function_unchecked(
-                function.clone(),
+                function1.clone(),
                 base_pointer,
                 interpreter.stack.len(),
             )
         };
-        self.create_function(Rc::new(FnSignature {
-            body: FnBody::Builtin(Box::new(curried_method)),
-            arity: function1.signature.arity + 1,
-            variadic: function1.signature.variadic,
-            upvalues: vec![],
-        }))
+        Self::create_builtin_function(
+            function.signature.arity + 1,
+            function.signature.variadic,
+            curried_method,
+        )
     }
     pub fn create_function(&mut self, signature: Rc<FnSignature>) -> Function {
         let upvalues = signature
@@ -237,6 +218,21 @@ impl Interpreter {
             upvalues,
         }
     }
+    pub fn create_builtin_function(
+        arity: usize,
+        variadic: bool,
+        builtin: impl FnMut(&mut Interpreter) -> Result<Value, ErrorKind> + 'static,
+    ) -> Function {
+        Function {
+            signature: Rc::new(FnSignature {
+                arity,
+                variadic,
+                upvalues: vec![],
+                body: FnBody::Builtin(Box::new(RefCell::new(builtin))),
+            }),
+            upvalues: vec![],
+        }
+    }
     fn call_function_unchecked(
         &mut self,
         function: Rc<Function>,
@@ -251,7 +247,7 @@ impl Interpreter {
         mem::swap(&mut old_frame, &mut self.current_frame);
 
         let return_value = match &function.signature.body {
-            FnBody::Builtin(builtin) => builtin(self)?,
+            FnBody::Builtin(builtin) => builtin.borrow_mut()(self)?,
             FnBody::Bytecode(bytecodes) => {
                 let mut index = 0;
                 loop {
@@ -509,12 +505,11 @@ mod tests {
         let bytecode = [
             Bytecode::LoadNum(0.0),
             Bytecode::StoreLocal(0),
-            Bytecode::LoadObj(2),
-            Bytecode::Dup(3),
+            Bytecode::LoadStr(inc_name.clone()),
             Bytecode::LoadFn(inc_signature.clone()),
-            Bytecode::StoreProperty(inc_name.clone()),
+            Bytecode::LoadStr(dec_name.clone()),
             Bytecode::LoadFn(dec_signature.clone()),
-            Bytecode::StoreProperty(dec_name.clone()),
+            Bytecode::StackToObj(0),
             Bytecode::Return,
         ];
         let signature = Rc::new(FnSignature {

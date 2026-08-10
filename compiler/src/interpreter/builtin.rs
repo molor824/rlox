@@ -1,9 +1,12 @@
 use std::{cell::RefCell, rc::Rc};
 
+use rustc_hash::FxHashMap;
+
 use crate::{
     error::ErrorKind,
     interpreter::{
-        value::{Object, Value},
+        string::ValueStr,
+        value::{Function, Object, Value},
         Interpreter,
     },
 };
@@ -27,15 +30,15 @@ pub fn println(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
 }
 pub fn array(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let iter = interpreter.get_local(0).try_iterator()?;
-    let array = Value::Array(Rc::new(RefCell::new(iter.collect::<Vec<_>>())));
+    let array = Value::Array(Rc::new(RefCell::new(iter.collect::<Result<Vec<_>, _>>()?)));
     Ok(array)
 }
 pub fn object(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let iter = interpreter.get_local(0).try_iterator()?.map(|value| {
-        let arr = value.try_array()?;
+        let arr = value?.try_array()?;
         let arr = arr.borrow();
         Ok((
-            arr.get(0).cloned().unwrap_or_default().try_str()?,
+            arr.get(0).cloned().unwrap_or_default(),
             arr.get(1).cloned().unwrap_or_default(),
         )) as Result<_, ErrorKind>
     });
@@ -77,19 +80,54 @@ pub fn sqrt(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
         .try_num()
         .map(|n| Value::Number(n.sqrt()))
 }
+pub fn iter(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    let mut iterator = interpreter.get_local(0).try_iterator()?;
+    let fun = move |_: &mut Interpreter| -> Result<Value, ErrorKind> {
+        Ok(match iterator.next() {
+            Some(v) => Value::Array(Rc::new(RefCell::new(vec![v?]))),
+            None => Value::Nil,
+        })
+    };
+    let iter = Value::Function(Rc::new(Interpreter::create_builtin_function(0, false, fun)));
+    Ok(iter)
+}
+pub fn range(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    let mut start = interpreter.get_local(0).try_num().ok().unwrap_or_default();
+    let end = interpreter.get_local(1).try_num().ok().unwrap_or_default();
+    let step = interpreter
+        .get_local(2)
+        .try_num()
+        .ok()
+        .unwrap_or(if start <= end { 1.0 } else { -1.0 });
 
-pub const GLOBALS: [(
-    &str,
-    usize,
-    bool,
-    fn(&mut Interpreter) -> Result<Value, ErrorKind>,
-); 8] = [
-    ("print", 0, true, print),
-    ("println", 0, true, println),
-    ("array", 1, false, array),
-    ("object", 1, false, object),
-    ("len", 1, false, length),
-    ("setbase", 2, false, set_base_obj),
-    ("getbase", 1, false, get_base_obj),
-    ("sqrt", 1, false, sqrt),
-];
+    let iter_fn = move |_: &mut Interpreter| -> Result<Value, ErrorKind> {
+        if start.abs() >= end.abs() {
+            Ok(Value::Nil)
+        } else {
+            let v = Value::Number(start);
+            start += step;
+            Ok(v)
+        }
+    };
+    let iter = Value::Function(Rc::new(Interpreter::create_builtin_function(
+        0, false, iter_fn,
+    )));
+    Ok(iter)
+}
+
+thread_local! {
+    pub static GLOBALS: FxHashMap<ValueStr, Rc<Function>> = [
+        ("print", 0, true, print as fn(&mut Interpreter) -> Result<Value, ErrorKind>),
+        ("println", 0, true, println),
+        ("array", 1, false, array),
+        ("object", 1, false, object),
+        ("len", 1, false, length),
+        ("setbase", 2, false, set_base_obj),
+        ("getbase", 1, false, get_base_obj),
+        ("sqrt", 1, false, sqrt),
+        ("iter", 1, false, iter),
+    ].into_iter().map(|(name, arity, variadic, ptr)| (
+        ValueStr::interned(name),
+        Rc::new(Interpreter::create_builtin_function(arity, variadic, ptr))
+    )).collect();
+}

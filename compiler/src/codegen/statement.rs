@@ -2,7 +2,11 @@ use crate::{
     ast::statement::Statement,
     codegen::{Codegen, ScopeKind},
     error::{Error, ErrorKind, Result},
-    interpreter::bytecode::Bytecode,
+    interpreter::{
+        builtin,
+        bytecode::{BinaryOp, Bytecode},
+        string::ValueStr,
+    },
     span::{GetSpan, Span, SpanOf},
 };
 
@@ -86,8 +90,6 @@ impl Codegen {
             } => {
                 self.push_scope(ScopeKind::Loop);
 
-                let continue_at = self.bytecodes().len();
-
                 self.gen_expr(condition)?;
                 debug_assert_eq!(self.stack_size(), Some(1));
 
@@ -98,11 +100,7 @@ impl Codegen {
                     self.gen_statement(stmt)?;
                 }
 
-                let continue_from = self.bytecodes().len();
-                self.push_bytecode(SpanOf(
-                    block.0,
-                    Bytecode::Jump(continue_at as isize - continue_from as isize),
-                ));
+                self.gen_statement(&Statement::Continue(block.0))?;
 
                 let break_until = self.bytecodes().len();
                 self.bytecodes_mut()[break_start].1 =
@@ -127,7 +125,7 @@ impl Codegen {
                     });
                 };
                 let id = self.bytecodes().len();
-                self.push_bytecode(SpanOf(*span, Bytecode::Nop));
+                self.push_bytecode(SpanOf(*span, Bytecode::Jump(0)));
                 let scope = &mut self.last_frame_mut().scopes[loop_idx];
                 match statement {
                     Statement::Break(..) => scope.break_locs.push(id),
@@ -140,7 +138,68 @@ impl Codegen {
                 }
                 self.push_bytecode(SpanOf(expr.0, Bytecode::Return));
             }
-            _ => todo!(),
+            Statement::For {
+                ident, expr, block, ..
+            } => {
+                /*
+                 * Equivalent syntax:
+                 * do
+                 *   let __tmp = iter(expr)
+                 *   while let __tmp_item = __tmp(); __tmp_item != nil do
+                 *     let $ident = __tmp_item[0]
+                 *     $block
+                 *   end
+                 * end
+                 */
+                self.push_scope(ScopeKind::Block);
+
+                let iter_id = self.decl_local("".into()).unwrap();
+
+                // Iter setup
+                self.gen_expr(expr)?;
+                self.push_bytecode(SpanOf(
+                    expr.span(),
+                    Bytecode::CallBuiltin(
+                        0,
+                        builtin::GLOBALS
+                            .with(|globals| globals[&ValueStr::interned("iter")].clone()),
+                    ),
+                ));
+                self.push_bytecode(SpanOf(expr.span(), Bytecode::StoreLocal(iter_id)));
+
+                // While setup
+
+                self.push_scope(ScopeKind::Loop);
+
+                let ident_id = self
+                    .decl_local(ValueStr::interned(&ident.get_str()))
+                    .unwrap();
+
+                self.push_bytecode(SpanOf(ident.0, Bytecode::LoadLocal(iter_id)));
+                self.push_bytecode(SpanOf(ident.0, Bytecode::Call(0)));
+                self.push_bytecode(SpanOf(ident.0, Bytecode::Dup(2)));
+                self.push_bytecode(SpanOf(ident.0, Bytecode::LoadNil));
+                self.push_bytecode(SpanOf(ident.0, Bytecode::Binary(BinaryOp::SetNe)));
+                let break_start = self.bytecodes().len();
+                self.push_bytecode(SpanOf(ident.0, Bytecode::BranchIf(false, 0)));
+                // Condition met
+                self.push_bytecode(SpanOf(ident.0, Bytecode::StoreLocal(ident_id)));
+
+                for stmt in block.1.iter() {
+                    self.gen_statement(stmt)?;
+                }
+
+                self.gen_statement(&Statement::Continue(block.0))?;
+
+                let break_end = self.bytecodes().len();
+
+                self.bytecodes_mut()[break_start].1 =
+                    Bytecode::BranchIf(false, break_end as isize - break_start as isize);
+
+                self.pop_scope();
+
+                self.pop_scope();
+            }
         }
         debug_assert_eq!(self.stack_size(), Some(0));
         Ok(())
@@ -207,6 +266,41 @@ mod tests {
             .split("\n")
             .map(str::trim)
             .collect::<Vec<_>>();
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
+            println!("{:?}", bc.1);
+            assert_eq!(expected, format!("{:?}", bc.1));
+        }
+    }
+    #[test]
+    fn test_for_stmt() {
+        let mut parser = Parser::new(r#"for i in range(0, 4, 0.25) do print(i) end"#.as_bytes());
+        let mut codegen = Codegen::with_source(parser.source());
+        codegen
+            .gen_statement(&parser.next_statement().unwrap().unwrap())
+            .unwrap();
+
+        let expected = r#"LoadGlobal("range")
+        LoadNum(0.0)
+        LoadNum(4.0)
+        LoadNum(0.25)
+        Call(0)
+        CallBuiltin(0, Function { signature: FnSignature { arity: 1, variadic: false, upvalues: [], body: Builtin("..") }, upvalues: [] })
+        StoreLocal(0)
+        LoadLocal(0)
+        Call(0)
+        Dup(2)
+        LoadNil
+        Binary(SetNe)
+        BranchIf(false, 7)
+        StoreLocal(1)
+        LoadGlobal("print")
+        LoadLocal(1)
+        Call(0)
+        Dup(0)
+        Jump(-11)
+        Truncate(1)
+        Truncate(0)"#.split('\n').map(str::trim);
 
         for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);

@@ -157,12 +157,11 @@ fn vector2(x, y) setbase({x, y}, vec2_base)
 
         let expected = [
             Bytecode::GlobalDeclare("vec2_base".into()),
-            Bytecode::LoadObj(4),
-            Bytecode::Dup(5),
+            Bytecode::LoadStr("x".into()),
             Bytecode::LoadNum(0.0),
-            Bytecode::StoreProperty("x".into()),
+            Bytecode::LoadStr("y".into()),
             Bytecode::LoadNum(0.0),
-            Bytecode::StoreProperty("y".into()),
+            Bytecode::LoadStr("sqr_len".into()),
             Bytecode::LoadFn(Rc::new(FnSignature {
                 arity: 1,
                 variadic: false,
@@ -185,7 +184,7 @@ fn vector2(x, y) setbase({x, y}, vec2_base)
                     .collect(),
                 ),
             })),
-            Bytecode::StoreProperty("sqr_len".into()),
+            Bytecode::LoadStr("len".into()),
             Bytecode::LoadFn(Rc::new(FnSignature {
                 arity: 1,
                 variadic: false,
@@ -204,7 +203,7 @@ fn vector2(x, y) setbase({x, y}, vec2_base)
                     .collect(),
                 ),
             })),
-            Bytecode::StoreProperty("len".into()),
+            Bytecode::StackToObj(0),
             Bytecode::StoreGlobal("vec2_base".into()),
             Bytecode::GlobalReadOnly("vec2_base".into()),
             Bytecode::GlobalDeclare("vector2".into()),
@@ -215,12 +214,11 @@ fn vector2(x, y) setbase({x, y}, vec2_base)
                 body: FnBody::Bytecode(
                     [
                         Bytecode::LoadGlobal("setbase".into()),
-                        Bytecode::LoadObj(2),
-                        Bytecode::Dup(3),
+                        Bytecode::LoadStr("x".into()),
                         Bytecode::LoadLocal(0),
-                        Bytecode::StoreProperty("x".into()),
+                        Bytecode::LoadStr("y".into()),
                         Bytecode::LoadLocal(1),
-                        Bytecode::StoreProperty("y".into()),
+                        Bytecode::StackToObj(1),
                         Bytecode::LoadGlobal("vec2_base".into()),
                         Bytecode::Call(0),
                         Bytecode::Return,
