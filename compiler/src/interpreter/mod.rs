@@ -243,8 +243,6 @@ impl Interpreter {
         base_pointer: usize,
         base_stack: usize,
     ) -> Result<Value, ErrorKind> {
-        self.stack.truncate(base_stack);
-
         let mut old_frame = Some(FunctionFrame {
             base_pointer,
             base_stack,
@@ -276,18 +274,18 @@ impl Interpreter {
     fn call_function(&mut self, base_stack: usize) -> Result<Value, ErrorKind> {
         let next_base_stack = base_stack + self.base_stack();
         let base_pointer = self.memory.len();
-        let function = self.pop_stack().try_function()?;
+        let function = self.stack[next_base_stack].try_function()?;
         let stack_len = self.stack.len();
+        let base_param = next_base_stack + 1;
 
-        let iter = self.stack
-            [next_base_stack..((next_base_stack + function.signature.arity).min(stack_len))]
+        let iter = self.stack[base_param..((base_param + function.signature.arity).min(stack_len))]
             .iter_mut();
         self.memory
             .extend(iter.map(|elem| Cell::Value(replace(elem, Value::Nil))));
 
         if function.signature.variadic {
             let array = Value::Array(Rc::new(RefCell::new(
-                self.stack[(next_base_stack + function.signature.arity)..]
+                self.stack[(base_param + function.signature.arity)..]
                     .iter_mut()
                     .map(|elem| replace(elem, Value::Nil))
                     .collect::<Vec<_>>(),
@@ -298,8 +296,9 @@ impl Interpreter {
             }
             self.memory[loc] = Cell::Value(array);
         }
+        self.stack.truncate(next_base_stack);
 
-        self.call_function_unchecked(function, base_pointer, base_stack)
+        self.call_function_unchecked(function, base_pointer, next_base_stack)
     }
     pub fn call_function_args(
         &mut self,
@@ -321,7 +320,7 @@ mod tests {
 
     use crate::{
         interpreter::{
-            bytecode::{BinaryOp, BranchCond, Bytecode},
+            bytecode::{BinaryOp, Bytecode},
             string::ValueStr,
             value::Value,
             FnBody, FnSignature, Interpreter, UpvalueLoc,
@@ -367,7 +366,8 @@ mod tests {
             // while start
             Bytecode::LoadLocal(0),
             Bytecode::LoadNum(0.0),
-            Bytecode::Branch(BranchCond::Gt, 12),
+            Bytecode::Binary(BinaryOp::SetGt),
+            Bytecode::BranchIf(false, 12),
 
             Bytecode::LoadLocal(1),
             Bytecode::LoadLocal(2),
@@ -382,7 +382,7 @@ mod tests {
             Bytecode::Binary(BinaryOp::Sub),
             Bytecode::StoreLocal(0),
 
-            Bytecode::Jump(-13),
+            Bytecode::Jump(-14),
             // While end
             Bytecode::LoadLocal(1),
             Bytecode::Return,
@@ -419,7 +419,8 @@ mod tests {
         let bytecode = [
             Bytecode::LoadLocal(0),
             Bytecode::LoadNum(1.0),
-            Bytecode::Branch(BranchCond::Le, 13),
+            Bytecode::Binary(BinaryOp::SetLe),
+            Bytecode::BranchIf(true, 13),
 
             Bytecode::LoadLocal(0),
             Bytecode::LoadNum(1.0),

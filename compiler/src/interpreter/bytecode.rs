@@ -34,17 +34,17 @@ pub enum UnaryOp {
     SetTrue,
     SetFalse,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BranchCond {
-    False,
-    True,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
+// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// pub enum BranchCond {
+//     False,
+//     True,
+//     Eq,
+//     Ne,
+//     Lt,
+//     Le,
+//     Gt,
+//     Ge,
+// }
 
 #[derive(Debug, Clone)]
 #[rustfmt::skip]
@@ -61,7 +61,7 @@ pub enum Bytecode {
     // Unary operations
     Unary(UnaryOp), // s0 -> <UNARY> s0
     // Branching operations
-    Branch(BranchCond, isize), // if BranchCond::True || BranchCond::False then s0 -> <BR_IF> .0 s0; else s0, s1 -> <BR_IF> .0 s0 s1;
+    BranchIf(bool, isize), // s0 -> if s0 == .0 then <JMP> .1 else <NOP>;
     // Global memory
     GlobalDeclare(ValueStr), // declare global
     GlobalReadOnly(ValueStr), // make global readonly
@@ -89,11 +89,11 @@ pub enum Bytecode {
     LoadStr(ValueStr),
     LoadObj(usize), // () -> obj::with_capacity(.0)
     UnpackIter, // s0 -> *iter(s0)
-    MergeObj, // obj, iter -> obj with { *iter } applied (iter should return [k, v])
+    MergeObj, // obj, iter -> obj with { *iter } applied (iter should return [k, v]);
     // Jumping
     Jump(isize), // pc += .0
     // Function call
-    Call(usize), // starting at .0 offset: p0, p1, p2, ..., func -> func(p0, p1, p2, ...)
+    Call(usize), // starting at .0 offset: func, p0, p1, p2, ... -> func(p0, p1, p2, ...)
     // Return
     Return, // v0 -> return(v0);
 }
@@ -227,31 +227,9 @@ impl Bytecode {
 
                 interpreter.push_stack(Value::Array(Rc::new(RefCell::new(vec))));
             }
-            Bytecode::Branch(cond, offset) => {
-                let b = interpreter.pop_stack();
-                let condition = match cond {
-                    BranchCond::False => !b.as_bool(),
-                    BranchCond::True => b.as_bool(),
-                    BranchCond::Eq => interpreter.pop_stack() == b,
-                    BranchCond::Ne => interpreter.pop_stack() != b,
-                    BranchCond::Lt => interpreter
-                        .pop_stack()
-                        .try_cmp(&b)?
-                        .is_some_and(|c| c.is_lt()),
-                    BranchCond::Gt => interpreter
-                        .pop_stack()
-                        .try_cmp(&b)?
-                        .is_some_and(|c| c.is_gt()),
-                    BranchCond::Le => interpreter
-                        .pop_stack()
-                        .try_cmp(&b)?
-                        .is_some_and(|c| c.is_le()),
-                    BranchCond::Ge => interpreter
-                        .pop_stack()
-                        .try_cmp(&b)?
-                        .is_some_and(|c| c.is_ge()),
-                };
-                if condition {
+            Bytecode::BranchIf(cond, offset) => {
+                let a = interpreter.pop_stack();
+                if a.as_bool() == *cond {
                     return Ok(Ok(index.wrapping_add_signed(*offset)));
                 }
             }

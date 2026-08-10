@@ -63,11 +63,7 @@ fn main() {
     }
 
     let init_sig = Rc::new(codegen.pop_init_sig());
-    let init_fn = Rc::new(
-        interpreter
-            .create_function(init_sig)
-            .unwrap_or_else(|err| print_err_exit(err)),
-    );
+    let init_fn = Rc::new(interpreter.create_function(init_sig));
     interpreter
         .call_function_args(init_fn, std::iter::empty())
         .unwrap_or_else(|err| print_err_exit(err));

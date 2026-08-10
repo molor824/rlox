@@ -7,21 +7,23 @@ use crate::{
     },
     codegen::Codegen,
     error::Result,
-    interpreter::{
-        bytecode::{Bytecode, Load, Store},
-        string::ValueStr,
-        FnBody, FnSignature,
-    },
+    interpreter::{bytecode::Bytecode, string::ValueStr, FnBody, FnSignature},
     span::{GetSpan, SpanOf},
 };
 
 impl Codegen {
     pub fn gen_decl(&mut self, declaration: &Declaration) -> Result<()> {
         match declaration {
-            Declaration::VarDecl(decl) => self.gen_var_decl(decl),
-            Declaration::FuncDecl(decl) => self.gen_func_decl(decl),
-            Declaration::Expression(expr) => self.gen_expr(expr, Some(Store::Nil)).map(|_| ()),
+            Declaration::VarDecl(decl) => self.gen_var_decl(decl)?,
+            Declaration::FuncDecl(decl) => self.gen_func_decl(decl)?,
+            Declaration::Expression(expr) => {
+                self.gen_expr(expr)?;
+                debug_assert_eq!(self.stack_size(), Some(1));
+                self.push_bytecode(SpanOf(expr.span(), Bytecode::Dup(0)));
+            }
         }
+        debug_assert_eq!(self.stack_size(), Some(0));
+        Ok(())
     }
     pub(crate) fn create_func_sig(&mut self, decl: &Closure) -> Result<FnSignature> {
         self.push_frame();
@@ -44,8 +46,9 @@ impl Codegen {
                 }
             }
             FunctionBody::Expression(expr) => {
-                let load = self.gen_expr(expr, None)?;
-                self.push_bytecode(SpanOf(expr.span(), Bytecode::Return(load)));
+                self.gen_expr(expr)?;
+                self.push_bytecode(SpanOf(expr.span(), Bytecode::Return));
+                debug_assert_eq!(self.stack_size(), Some(0));
             }
         }
 
@@ -62,11 +65,8 @@ impl Codegen {
         // pre-declare the function name to allow recursion
         // function declaration is const by default
         let name = ValueStr::interned(&decl.ident.get_str());
-        let store_method = match self.decl_local(name.clone()) {
-            Some(id) => Store::Local(id),
-            None => Store::Global(name),
-        };
-        if let Store::Global(name) = &store_method {
+        let decl_id = self.decl_local(name.clone());
+        if decl_id.is_none() {
             self.push_bytecode(SpanOf(
                 decl.fn_keyword,
                 Bytecode::GlobalDeclare(name.clone()),
@@ -74,39 +74,45 @@ impl Codegen {
         }
 
         let sig = self.create_func_sig(&decl.closure)?;
+        self.push_bytecode(SpanOf(decl.closure.span(), Bytecode::LoadFn(Rc::new(sig))));
+        debug_assert_eq!(self.stack_size(), Some(1));
         self.push_bytecode(SpanOf(
-            decl.closure.span(),
-            Bytecode::Move {
-                dst: store_method.clone(),
-                src: Load::Function(Rc::new(sig)),
+            decl.span(),
+            match decl_id {
+                Some(id) => Bytecode::StoreLocal(id),
+                None => Bytecode::StoreGlobal(name.clone()),
             },
         ));
 
         // mark constant
-        match store_method {
-            Store::Global(name) => {
-                self.push_bytecode(SpanOf(decl.span(), Bytecode::GlobalReadOnly(name)))
-            }
-            // TODO: Implement compile time const check for local variables!
-            _ => {}
+        if decl_id.is_none() {
+            self.push_bytecode(SpanOf(decl.fn_keyword, Bytecode::GlobalReadOnly(name)));
         }
 
         Ok(())
     }
     pub(crate) fn gen_var_decl(&mut self, decl: &VarDecl) -> Result<()> {
         let name = ValueStr::interned(&decl.ident.get_str());
-        let var_store_method = match self.decl_local(name.clone()) {
-            Some(id) => Store::Local(id),
-            None => Store::Global(name),
-        };
-        if let Store::Global(name) = var_store_method.clone() {
-            self.push_bytecode(SpanOf(decl.keyword.0, Bytecode::GlobalDeclare(name)));
+        let decl_id = self.decl_local(name.clone());
+        if decl_id.is_none() {
+            self.push_bytecode(SpanOf(
+                decl.keyword.0,
+                Bytecode::GlobalDeclare(name.clone()),
+            ));
         }
 
-        self.gen_expr(&decl.assigner, Some(var_store_method.clone()))?;
+        self.gen_expr(&decl.assigner)?;
+        debug_assert_eq!(self.stack_size(), Some(1));
+        self.push_bytecode(SpanOf(
+            decl.span(),
+            match decl_id {
+                Some(id) => Bytecode::StoreLocal(id),
+                None => Bytecode::StoreGlobal(name.clone()),
+            },
+        ));
 
         // TODO: Implement compile-time constant check for local variables!
-        if let Store::Global(name) = var_store_method {
+        if decl_id.is_none() {
             if &*decl.keyword.get_str() == "const" {
                 self.push_bytecode(SpanOf(decl.keyword.0, Bytecode::GlobalReadOnly(name)));
             }

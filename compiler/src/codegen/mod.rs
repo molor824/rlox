@@ -27,20 +27,11 @@ struct Scope {
 struct FnFrame {
     locals: Vec<ValueStr>,
     scopes: Vec<Scope>,
-    stack_size: usize,
+    stack_size: Option<usize>, // try to predict, however prediction can fail throughout the generation for iterator unpacking bytecode
     upvalues: Vec<(ValueStr, UpvalueLoc)>,
     bytecodes: Vec<SpanOf<Bytecode>>,
 }
 impl FnFrame {
-    fn push_stack(&mut self) {
-        self.stack_size += 1;
-    }
-    fn pop_stack(&mut self) {
-        self.stack_size -= 1;
-    }
-    fn stack_size(&self) -> usize {
-        self.stack_size
-    }
     fn get_upvalue(&self, name: ValueStr) -> Option<usize> {
         self.upvalues.iter().rposition(|n| n.0 == name)
     }
@@ -48,13 +39,11 @@ impl FnFrame {
         self.locals.iter().rposition(|n| *n == name)
     }
     fn decl_local(&mut self, name: ValueStr) -> usize {
-        assert_eq!(self.stack_size, 0);
         let id = self.locals.len();
         self.locals.push(name);
         id
     }
     fn push_scope(&mut self, kind: ScopeKind, base_loc: usize) {
-        assert_eq!(self.stack_size, 0);
         self.scopes.push(Scope {
             kind,
             base_loc,
@@ -64,14 +53,9 @@ impl FnFrame {
         });
     }
     fn pop_scope(&mut self) -> Option<Scope> {
-        assert_eq!(self.stack_size, 0);
-        self.scopes.pop().inspect(|s| {
-            self.locals.truncate(s.base_local_size as usize);
-            self.stack_size = s.base_local_size - self.locals.len();
-        })
-    }
-    fn total_size(&self) -> usize {
-        self.locals.len() + self.stack_size
+        self.scopes
+            .pop()
+            .inspect(|s| self.locals.truncate(s.base_local_size))
     }
 }
 
@@ -98,7 +82,7 @@ impl Codegen {
         self.frames.push(FnFrame {
             locals: vec![],
             scopes: vec![],
-            stack_size: 0,
+            stack_size: Some(0),
             upvalues: vec![],
             bytecodes: vec![],
         });
@@ -107,7 +91,9 @@ impl Codegen {
         self.frames.pop()
     }
     fn push_bytecode(&mut self, bytecode: SpanOf<Bytecode>) {
-        self.last_frame_mut().bytecodes.push(bytecode);
+        let frame = self.last_frame_mut();
+        frame.stack_size = Self::next_stack(&bytecode.1, frame.stack_size);
+        frame.bytecodes.push(bytecode);
     }
     pub fn bytecodes(&self) -> &[SpanOf<Bytecode>] {
         &self.last_frame().bytecodes
@@ -124,17 +110,8 @@ impl Codegen {
             _ => None,
         }
     }
-    fn total_size(&self) -> usize {
-        self.last_frame().total_size()
-    }
-    fn push_stack(&mut self) {
-        self.last_frame_mut().push_stack();
-    }
-    fn pop_stack(&mut self) {
-        self.last_frame_mut().pop_stack();
-    }
-    fn stack_size(&self) -> usize {
-        self.last_frame().stack_size()
+    fn stack_size(&self) -> Option<usize> {
+        self.last_frame().stack_size
     }
     fn get_local_var(&self, name: ValueStr) -> Option<usize> {
         self.last_frame().get_local_var(name)
@@ -179,6 +156,39 @@ impl Codegen {
             variadic: false,
             upvalues: vec![],
             body: FnBody::Bytecode(frame.bytecodes),
+        }
+    }
+    pub fn next_stack(bc: &Bytecode, stack: Option<usize>) -> Option<usize> {
+        match bc {
+            Bytecode::Call(base) | Bytecode::StackToArray(base) => Some(*base + 1),
+            Bytecode::Dup(n) => stack.map(|s| s - 1 + *n),
+            Bytecode::LoadBool(..)
+            | Bytecode::LoadFn(..)
+            | Bytecode::LoadGlobal(..)
+            | Bytecode::LoadLocal(..)
+            | Bytecode::LoadNil
+            | Bytecode::LoadNum(..)
+            | Bytecode::LoadObj(..)
+            | Bytecode::LoadStr(..)
+            | Bytecode::LoadUpvalue(..) => stack.map(|s| s + 1),
+            Bytecode::StoreGlobal(..)
+            | Bytecode::StoreLocal(..)
+            | Bytecode::StoreUpvalue(..)
+            | Bytecode::Return
+            | Bytecode::Binary(..)
+            | Bytecode::BranchIf(..)
+            | Bytecode::LoadPropertyIndirect => stack.map(|s| s - 1),
+            Bytecode::MergeObj | Bytecode::StoreProperty(..) => stack.map(|s| s - 2),
+            Bytecode::StorePropertyIndirect => stack.map(|s| s - 3),
+            Bytecode::Truncate(..)
+            | Bytecode::Nop
+            | Bytecode::Jump(..)
+            | Bytecode::GlobalDeclare(..)
+            | Bytecode::GlobalReadOnly(..)
+            | Bytecode::Unary(..)
+            | Bytecode::LoadProperty(..)
+            | Bytecode::LoadMethod(..) => stack,
+            Bytecode::UnpackIter => None,
         }
     }
 }
