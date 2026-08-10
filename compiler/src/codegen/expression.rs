@@ -98,27 +98,27 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use crate::{ast::Parser, codegen::Codegen, interpreter::bytecode::Bytecode};
 
     #[test]
     fn expr_codegen_test() {
         let mut parser = Parser::new("[1, 2, *[nil, true], false]".as_bytes());
         let result = parser.next_expression(false).unwrap().unwrap();
-        // #[rustfmt::skip]
-        // let expected = [
-        //     Bytecode::Move { dst: Store::Global(test_ident.clone()), src: Load::Array(4) },
-        //     Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Number(1.0) },
-        //     Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Number(2.0) },
-        //     Bytecode::Move { dst: Store::Local(0), src: Load::Array(2) },
-        //     Bytecode::AppendElement { dst: Load::Local(0), src: Load::Nil },
-        //     Bytecode::AppendElement { dst: Load::Local(0), src: Load::Bool(true) },
-        //     Bytecode::AppendElements { dst: Load::Global(test_ident.clone()), src: Load::Local(0) },
-        //     Bytecode::AppendElement { dst: Load::Global(test_ident.clone()), src: Load::Bool(false) },
-        // ];
+        let expected = [
+            Bytecode::LoadNum(1.0),
+            Bytecode::LoadNum(2.0),
+            Bytecode::LoadNil,
+            Bytecode::LoadBool(true),
+            Bytecode::StackToArray(2),
+            Bytecode::UnpackIter,
+            Bytecode::LoadBool(false),
+            Bytecode::StackToArray(0),
+        ];
         let mut codegen = Codegen::with_source(parser.source());
         codegen.gen_expr(&result).unwrap();
-        for bc in codegen.bytecodes().into_iter() {
+        for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }

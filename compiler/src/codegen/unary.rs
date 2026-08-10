@@ -76,34 +76,43 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use crate::{
+        ast::Parser,
+        codegen::Codegen,
+        interpreter::{
+            bytecode::{Bytecode, UnaryOp},
+            string::ValueStr,
+        },
+    };
 
     #[test]
     fn unary_gen_test() {
         let mut parser = Parser::new("-~!foo[0].test:method(1, 2, 3)(4, 5, *rest)".as_bytes());
         let result = parser.next_expression(false).unwrap().unwrap();
-        // #[rustfmt::skip]
-        // let expected = [
-        //     Bytecode::LoadPropertyIndirect { dst: Store::Local(7), src: Load::Global("foo".into()), prop: Load::Number(0.0) },
-        //     Bytecode::LoadProperty { dst: Store::Local(6), src: Load::Local(7), prop: "test".into() },
-        //     Bytecode::LoadMethod { dst: Store::Local(5), src: Load::Local(6), prop: "method".into() },
-        //     Bytecode::Move { dst: Store::Local(8), src: Load::Number(1.0) },
-        //     Bytecode::Move { dst: Store::Local(9), src: Load::Number(2.0) },
-        //     Bytecode::Move { dst: Store::Local(10), src: Load::Number(3.0) },
-        //     Bytecode::Call { src: Load::Local(5), base: 8, dst: Store::Local(4) },
-        //     Bytecode::Move { dst: Store::Local(11), src: Load::Array(3) },
-        //     Bytecode::AppendElement { dst: Load::Local(11), src: Load::Number(4.0) },
-        //     Bytecode::AppendElement { dst: Load::Local(11), src: Load::Number(5.0) },
-        //     Bytecode::AppendElements { dst: Load::Local(11), src: Load::Global("rest".into()) },
-        //     Bytecode::CallArray { src: Load::Local(4), args: Load::Local(11), dst: Store::Local(3) },
-        //     Bytecode::SetFalse { dst: Store::Local(2), src: Load::Local(3) },
-        //     Bytecode::Invert { dst: Store::Local(1), src: Load::Local(2) },
-        //     Bytecode::Negate { dst: Store::Local(0), src: Load::Local(1) },
-        // ];
+        let expected = [
+            Bytecode::LoadGlobal(ValueStr::interned("foo")),
+            Bytecode::LoadNum(0.0),
+            Bytecode::LoadPropertyIndirect,
+            Bytecode::LoadProperty(ValueStr::interned("test")),
+            Bytecode::LoadMethod(ValueStr::interned("method")),
+            Bytecode::LoadNum(1.0),
+            Bytecode::LoadNum(2.0),
+            Bytecode::LoadNum(3.0),
+            Bytecode::Call(0),
+            Bytecode::LoadNum(4.0),
+            Bytecode::LoadNum(5.0),
+            Bytecode::LoadGlobal(ValueStr::interned("rest")),
+            Bytecode::UnpackIter,
+            Bytecode::Call(0),
+            Bytecode::Unary(UnaryOp::SetFalse),
+            Bytecode::Unary(UnaryOp::Swap),
+            Bytecode::Unary(UnaryOp::Negate),
+        ];
         let mut codegen = Codegen::with_source(parser.source());
         codegen.gen_expr(&result).unwrap();
-        for bc in codegen.bytecodes().into_iter() {
+        for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }

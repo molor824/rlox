@@ -306,10 +306,10 @@ impl Interpreter {
         args: impl IntoIterator<Item = Value>,
     ) -> Result<Value, ErrorKind> {
         let base = self.stack.len();
+        self.stack.push(Value::Function(function));
         for arg in args {
             self.stack.push(arg);
         }
-        self.stack.push(Value::Function(function));
         self.call_function(base)
     }
 }
@@ -422,16 +422,16 @@ mod tests {
             Bytecode::Binary(BinaryOp::SetLe),
             Bytecode::BranchIf(true, 13),
 
+            Bytecode::LoadGlobal(name.clone()),
             Bytecode::LoadLocal(0),
             Bytecode::LoadNum(1.0),
             Bytecode::Binary(BinaryOp::Sub),
-            Bytecode::LoadGlobal(name.clone()),
             Bytecode::Call(0),
 
+            Bytecode::LoadGlobal(name.clone()),
             Bytecode::LoadLocal(0),
             Bytecode::LoadNum(2.0),
             Bytecode::Binary(BinaryOp::Sub),
-            Bytecode::LoadGlobal(name.clone()),
             Bytecode::Call(1),
 
             Bytecode::Binary(BinaryOp::Add),

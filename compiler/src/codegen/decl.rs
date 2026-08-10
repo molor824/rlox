@@ -123,7 +123,17 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use std::rc::Rc;
+
+    use crate::{
+        ast::Parser,
+        codegen::Codegen,
+        interpreter::{
+            bytecode::{BinaryOp, Bytecode},
+            FnBody, FnSignature,
+        },
+        span::{Span, SpanOf},
+    };
 
     #[test]
     fn test_decl() {
@@ -135,7 +145,7 @@ const vec2_base = {
     sqr_len: \self -> self.x ** 2 + self.y ** 2,
     len: \self -> sqrt(self:sqr_len()),
 }
-fn vector2(x, y) base({x, y}, vec2_base)
+fn vector2(x, y) setbase({x, y}, vec2_base)
             "#
             .as_bytes(),
         );
@@ -145,8 +155,88 @@ fn vector2(x, y) base({x, y}, vec2_base)
             codegen.gen_statement(&stmt).unwrap();
         }
 
-        for bc in codegen.bytecodes() {
+        let expected = [
+            Bytecode::GlobalDeclare("vec2_base".into()),
+            Bytecode::LoadObj(4),
+            Bytecode::Dup(5),
+            Bytecode::LoadNum(0.0),
+            Bytecode::StoreProperty("x".into()),
+            Bytecode::LoadNum(0.0),
+            Bytecode::StoreProperty("y".into()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 1,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadLocal(0),
+                        Bytecode::LoadProperty("x".into()),
+                        Bytecode::LoadNum(2.0),
+                        Bytecode::Binary(BinaryOp::Pow),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::LoadProperty("y".into()),
+                        Bytecode::LoadNum(2.0),
+                        Bytecode::Binary(BinaryOp::Pow),
+                        Bytecode::Binary(BinaryOp::Add),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreProperty("sqr_len".into()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 1,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadGlobal("sqrt".into()),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::LoadMethod("sqr_len".into()),
+                        Bytecode::Call(1),
+                        Bytecode::Call(0),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreProperty("len".into()),
+            Bytecode::StoreGlobal("vec2_base".into()),
+            Bytecode::GlobalReadOnly("vec2_base".into()),
+            Bytecode::GlobalDeclare("vector2".into()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 2,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadGlobal("setbase".into()),
+                        Bytecode::LoadObj(2),
+                        Bytecode::Dup(3),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::StoreProperty("x".into()),
+                        Bytecode::LoadLocal(1),
+                        Bytecode::StoreProperty("y".into()),
+                        Bytecode::LoadGlobal("vec2_base".into()),
+                        Bytecode::Call(0),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreGlobal("vector2".into()),
+            Bytecode::GlobalReadOnly("vector2".into()),
+        ];
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }

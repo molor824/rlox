@@ -50,7 +50,7 @@ impl Codegen {
                 debug_assert_eq!(self.stack_size(), Some(1));
 
                 let br_index = self.bytecodes().len();
-                self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
+                self.push_bytecode(SpanOf(condition.span(), Bytecode::BranchIf(false, 0)));
 
                 for stmt in &met_block.1 {
                     self.gen_statement(stmt)?;
@@ -92,7 +92,7 @@ impl Codegen {
                 debug_assert_eq!(self.stack_size(), Some(1));
 
                 let break_start = self.bytecodes().len();
-                self.push_bytecode(SpanOf(condition.span(), Bytecode::Nop));
+                self.push_bytecode(SpanOf(condition.span(), Bytecode::BranchIf(false, 0)));
 
                 for stmt in &block.1 {
                     self.gen_statement(stmt)?;
@@ -135,11 +135,9 @@ impl Codegen {
                 }
             }
             Statement::Return(expr) => {
-                match &expr.1 {
-                    Some(expr) => self.gen_expr(expr)?,
-                    None => self.push_bytecode(SpanOf(expr.0, Bytecode::LoadNil)),
-                };
-                debug_assert_eq!(self.stack_size(), Some(1));
+                if let Some(expr) = &expr.1 {
+                    self.gen_expr(expr)?;
+                }
                 self.push_bytecode(SpanOf(expr.0, Bytecode::Return));
             }
             _ => todo!(),
@@ -173,8 +171,46 @@ mod tests {
             codegen.gen_statement(&stmt).unwrap();
         }
 
-        for bc in codegen.bytecodes() {
+        let expected = r#"GlobalDeclare("i")
+            LoadNum(0.0)
+            StoreGlobal("i")
+            GlobalDeclare("j")
+            LoadNum(30.0)
+            StoreGlobal("j")
+            LoadBool(true)
+            BranchIf(false, 26)
+            LoadGlobal("i")
+            LoadGlobal("j")
+            Binary(SetEq)
+            BranchIf(false, 2)
+            Jump(-6)
+            LoadGlobal("i")
+            LoadNum(2.0)
+            Binary(Pow)
+            LoadGlobal("j")
+            Binary(SetEq)
+            BranchIf(false, 2)
+            Jump(14)
+            LoadGlobal("i")
+            LoadNum(1.0)
+            Binary(Add)
+            Dup(2)
+            StoreGlobal("i")
+            Dup(0)
+            LoadGlobal("j")
+            LoadNum(20.0)
+            Binary(Add)
+            Dup(2)
+            StoreGlobal("j")
+            Dup(0)
+            Jump(-26)"#
+            .split("\n")
+            .map(str::trim)
+            .collect::<Vec<_>>();
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(expected, format!("{:?}", bc.1));
         }
     }
     #[test]
@@ -197,8 +233,49 @@ mod tests {
             .gen_statement(&parser.next_statement().unwrap().unwrap())
             .unwrap();
 
-        for bc in codegen.bytecodes() {
+        let expected = r#"LoadGlobal("n")
+            LoadNum(6.0)
+            Binary(Rem)
+            LoadNum(0.0)
+            Binary(SetEq)
+            BranchIf(false, 6)
+            LoadGlobal("print")
+            LoadStr("fizz buzz")
+            Call(0)
+            Dup(0)
+            Jump(26)
+            LoadGlobal("n")
+            LoadNum(2.0)
+            Binary(Rem)
+            LoadNum(0.0)
+            Binary(SetEq)
+            BranchIf(false, 6)
+            LoadGlobal("print")
+            LoadStr("fizz")
+            Call(0)
+            Dup(0)
+            Jump(15)
+            LoadGlobal("n")
+            LoadNum(3.0)
+            Binary(Rem)
+            LoadNum(0.0)
+            Binary(SetEq)
+            BranchIf(false, 6)
+            LoadGlobal("print")
+            LoadStr("buzz")
+            Call(0)
+            Dup(0)
+            Jump(4)
+            LoadGlobal("print")
+            Call(0)
+            Dup(0)"#
+            .split("\n")
+            .map(str::trim)
+            .collect::<Vec<_>>();
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(expected, format!("{:?}", bc.1));
         }
     }
 }

@@ -77,8 +77,8 @@ pub enum Bytecode {
     // Property
     LoadProperty(ValueStr), // obj -> obj[.0]
     LoadPropertyIndirect, // obj, key -> obj[key]
-    StoreProperty(ValueStr), // obj, val -> obj[.0] = val;
-    StorePropertyIndirect, // obj, key, val -> obj[key] = val;
+    StoreProperty(ValueStr), // val, obj -> obj[.0] = val;
+    StorePropertyIndirect, // val, obj, key -> obj[key] = val;
     LoadMethod(ValueStr), // obj -> (\... -> obj[key](obj[key], ...))
     // Array initialization
     StackToArray(usize), // starting at .0 offset: s0, s1, s2, ... -> [s0, s1, s2, ...]
@@ -176,14 +176,14 @@ impl Bytecode {
                 interpreter.push_stack(obj.get_property(&prop)?);
             }
             Bytecode::StoreProperty(prop) => {
-                let value = interpreter.pop_stack();
                 let obj = interpreter.pop_stack();
+                let value = interpreter.pop_stack();
                 obj.set_property(Value::String(prop.clone()), value)?;
             }
             Bytecode::StorePropertyIndirect => {
-                let value = interpreter.pop_stack();
                 let prop = interpreter.pop_stack();
                 let obj = interpreter.pop_stack();
+                let value = interpreter.pop_stack();
                 obj.set_property(prop, value)?;
             }
             Bytecode::LoadGlobal(name) => {

@@ -23,13 +23,23 @@ struct Scope {
     break_locs: Vec<usize>, // bytecode locations at which break statements occurred
     continue_locs: Vec<usize>, // bytecode locations at which continue statements occurred
 }
-#[derive(Default)]
 struct FnFrame {
     locals: Vec<ValueStr>,
     scopes: Vec<Scope>,
     stack_size: Option<usize>, // try to predict, however prediction can fail throughout the generation for iterator unpacking bytecode
     upvalues: Vec<(ValueStr, UpvalueLoc)>,
     bytecodes: Vec<SpanOf<Bytecode>>,
+}
+impl Default for FnFrame {
+    fn default() -> Self {
+        Self {
+            locals: vec![],
+            scopes: vec![],
+            stack_size: Some(0),
+            upvalues: vec![],
+            bytecodes: vec![],
+        }
+    }
 }
 impl FnFrame {
     fn get_upvalue(&self, name: ValueStr) -> Option<usize> {
@@ -79,13 +89,7 @@ impl Codegen {
         self.frames.last_mut().unwrap_or(&mut self.global_frame)
     }
     fn push_frame(&mut self) {
-        self.frames.push(FnFrame {
-            locals: vec![],
-            scopes: vec![],
-            stack_size: Some(0),
-            upvalues: vec![],
-            bytecodes: vec![],
-        });
+        self.frames.push(FnFrame::default());
     }
     fn pop_frame(&mut self) -> Option<FnFrame> {
         self.frames.pop()
@@ -195,7 +199,18 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use std::rc::Rc;
+
+    use crate::{
+        ast::Parser,
+        codegen::Codegen,
+        interpreter::{
+            bytecode::{BinaryOp, Bytecode},
+            string::ValueStr,
+            FnBody, FnSignature,
+        },
+        span::{Span, SpanOf},
+    };
 
     #[test]
     fn test_codegen() {
@@ -221,8 +236,59 @@ mod tests {
             .gen_statement(&parser.next_statement().unwrap().unwrap())
             .unwrap();
 
-        for bc in codegen.bytecodes() {
+        let fib = ValueStr::interned("fib");
+        let expected = [
+            Bytecode::GlobalDeclare(fib.clone()),
+            Bytecode::LoadFn(Rc::new(FnSignature {
+                arity: 1,
+                variadic: false,
+                upvalues: vec![],
+                body: FnBody::Bytecode(
+                    [
+                        Bytecode::LoadNum(0.0),
+                        Bytecode::StoreLocal(1),
+                        Bytecode::LoadNum(1.0),
+                        Bytecode::StoreLocal(2),
+                        Bytecode::LoadNum(0.0),
+                        Bytecode::StoreLocal(3),
+                        Bytecode::LoadLocal(3),
+                        Bytecode::LoadLocal(0),
+                        Bytecode::Binary(BinaryOp::SetLt),
+                        Bytecode::BranchIf(false, 20),
+                        Bytecode::LoadLocal(1),
+                        Bytecode::LoadLocal(2),
+                        Bytecode::Binary(BinaryOp::Add),
+                        Bytecode::StoreLocal(4),
+                        Bytecode::LoadLocal(2),
+                        Bytecode::Dup(2),
+                        Bytecode::StoreLocal(1),
+                        Bytecode::Dup(0),
+                        Bytecode::LoadLocal(4),
+                        Bytecode::Dup(2),
+                        Bytecode::StoreLocal(2),
+                        Bytecode::Dup(0),
+                        Bytecode::LoadLocal(3),
+                        Bytecode::LoadNum(1.0),
+                        Bytecode::Binary(BinaryOp::Add),
+                        Bytecode::Dup(2),
+                        Bytecode::StoreLocal(3),
+                        Bytecode::Dup(0),
+                        Bytecode::Jump(-22),
+                        Bytecode::LoadLocal(3),
+                        Bytecode::Return,
+                    ]
+                    .into_iter()
+                    .map(|bc| SpanOf(Span::default(), bc))
+                    .collect(),
+                ),
+            })),
+            Bytecode::StoreGlobal(fib.clone()),
+            Bytecode::GlobalReadOnly(fib),
+        ];
+
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }

@@ -99,27 +99,41 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen};
+    use crate::{
+        ast::Parser,
+        codegen::Codegen,
+        interpreter::bytecode::{BinaryOp, Bytecode},
+    };
 
     #[test]
     fn assign_gen_test() {
         let mut parser = Parser::new("a=b=c.d=e.f[0]=1+2".as_bytes());
         let mut codegen = Codegen::with_source(parser.source());
+
         codegen
             .gen_expr(&parser.next_expression(false).unwrap().unwrap())
             .unwrap();
 
-        // #[rustfmt::skip]
-        // let expected = [
-        //     Bytecode::Add { dst: Store::Local(0), src0: Load::Number(1.0), src1: Load::Number(2.0) },
-        //     Bytecode::LoadProperty { dst: Store::Local(1), src: Load::Global("e".into()), prop: "f".into() },
-        //     Bytecode::StorePropertyIndirect { dst: Load::Local(1), src: Load::Local(0), prop: Load::Number(0.0) },
-        //     Bytecode::StoreProperty { dst: Load::Global("c".into()), src: Load::Local(0), prop: "d".into() },
-        //     Bytecode::Move { dst: Store::Global("b".into()), src: Load::Local(0) },
-        //     Bytecode::Move { dst: Store::Global("a".into()), src: Load::Local(0) },
-        // ];
-        for bc in codegen.bytecodes().into_iter() {
+        let expected = [
+            Bytecode::LoadNum(1.0),
+            Bytecode::LoadNum(2.0),
+            Bytecode::Binary(BinaryOp::Add),
+            Bytecode::Dup(2),
+            Bytecode::LoadGlobal("e".into()),
+            Bytecode::LoadProperty("f".into()),
+            Bytecode::LoadNum(0.0),
+            Bytecode::StorePropertyIndirect,
+            Bytecode::Dup(2),
+            Bytecode::LoadGlobal("c".into()),
+            Bytecode::StoreProperty("d".into()),
+            Bytecode::Dup(2),
+            Bytecode::StoreGlobal("b".into()),
+            Bytecode::Dup(2),
+            Bytecode::StoreGlobal("a".into()),
+        ];
+        for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 
@@ -128,22 +142,34 @@ mod tests {
         let mut parser = Parser::new("1!=0 + 2 * 0.2 or 3 <= 3 and 3>2".as_bytes());
         let mut codegen = Codegen::with_source(parser.source());
 
-        // #[rustfmt::skip]
-        // let expected = [
-        //     Bytecode::Mul { dst: Store::Local(2), src0: Load::Number(2.0), src1: Load::Number(0.2) },
-        //     Bytecode::Add { dst: Store::Local(1), src0: Load::Number(0.0), src1: Load::Local(2) },
-        //     Bytecode::SetNe { dst: Store::Local(0), src0: Load::Number(1.0), src1: Load::Local(1) },
-        //     Bytecode::BrTrue { offset: 4, src: Load::Local(0) },
-        //     Bytecode::SetLe { dst: Store::Local(0), src0: Load::Number(3.0), src1: Load::Number(3.0) },
-        //     Bytecode::BrFalse { offset: 2, src: Load::Local(0) },
-        //     Bytecode::SetGt { dst: Store::Local(0), src0: Load::Number(3.0), src1: Load::Number(2.0) },
-        // ];
+        let expected = [
+            Bytecode::LoadNum(1.0),
+            Bytecode::LoadNum(0.0),
+            Bytecode::LoadNum(2.0),
+            Bytecode::LoadNum(0.2),
+            Bytecode::Binary(BinaryOp::Mul),
+            Bytecode::Binary(BinaryOp::Add),
+            Bytecode::Binary(BinaryOp::SetNe),
+            Bytecode::Dup(2),
+            Bytecode::BranchIf(true, 11),
+            Bytecode::Dup(0),
+            Bytecode::LoadNum(3.0),
+            Bytecode::LoadNum(3.0),
+            Bytecode::Binary(BinaryOp::SetLe),
+            Bytecode::Dup(2),
+            Bytecode::BranchIf(false, 5),
+            Bytecode::Dup(0),
+            Bytecode::LoadNum(3.0),
+            Bytecode::LoadNum(2.0),
+            Bytecode::Binary(BinaryOp::SetGt),
+        ];
 
         codegen
             .gen_expr(&parser.next_expression(false).unwrap().unwrap())
             .unwrap();
-        for bc in codegen.bytecodes().iter() {
+        for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
+            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
         }
     }
 }
