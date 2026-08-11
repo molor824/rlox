@@ -118,21 +118,37 @@ impl Bytecode {
                 }
             }
             Bytecode::UnpackIter => {
-                let iter = interpreter.pop_stack().try_iterator()?;
-                interpreter.stack.reserve(iter.size_hint().0);
+                let mut tmp_stack = replace(&mut interpreter.stack, vec![]);
+                let tmp_stack_base = replace(
+                    &mut interpreter.current_frame.as_mut().unwrap().base_stack,
+                    0,
+                );
+                let iter = interpreter.pop_stack().try_iterator(interpreter)?;
+                tmp_stack.reserve(iter.size_hint().0);
                 for v in iter {
-                    interpreter.stack.push(v?);
+                    tmp_stack.push(v?);
                 }
+
+                interpreter.stack = tmp_stack;
+                interpreter.current_frame.as_mut().unwrap().base_stack = tmp_stack_base;
             }
             Bytecode::UnpackPairIter => {
-                let iter = interpreter.pop_stack().try_iterator()?;
-                interpreter.stack.reserve(iter.size_hint().0 * 2);
+                let mut tmp_stack = replace(&mut interpreter.stack, vec![]);
+                let tmp_stack_base = replace(
+                    &mut interpreter.current_frame.as_mut().unwrap().base_stack,
+                    0,
+                );
+                let iter = interpreter.pop_stack().try_iterator(interpreter)?;
+                tmp_stack.reserve(iter.size_hint().0 * 2);
                 for v in iter {
                     let v = v?;
                     let key = v.get_property(&Value::Number(0.0))?;
                     let value = v.get_property(&Value::Number(1.0))?;
-                    interpreter.stack.extend([key, value]);
+                    tmp_stack.extend([key, value]);
                 }
+
+                interpreter.stack = tmp_stack;
+                interpreter.current_frame.as_mut().unwrap().base_stack = tmp_stack_base;
             }
             Bytecode::Binary(op) => {
                 let b = interpreter.pop_stack();

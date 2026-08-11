@@ -1,6 +1,6 @@
 use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
-use crate::interpreter::FnSignature;
+use crate::interpreter::{FnSignature, Interpreter};
 use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
 use std::fmt;
@@ -182,10 +182,10 @@ impl Value {
             v => Err(ErrorKind::InvalidType(v.type_str(), "object")),
         }
     }
-    pub fn try_iterator(
+    pub fn try_iterator<'a>(
         self,
-        // interpreter: &mut Interpreter,
-    ) -> Result<Box<dyn Iterator<Item = Result<Value, ErrorKind>>>, ErrorKind> {
+        interpreter: &'a mut Interpreter,
+    ) -> Result<Box<dyn Iterator<Item = Result<Value, ErrorKind>> + 'a>, ErrorKind> {
         match self {
             Self::Array(arr) => {
                 let len = arr.borrow().len();
@@ -202,19 +202,11 @@ impl Value {
             Self::Object(obj) => Ok(Box::new(
                 obj.borrow()
                     .map
-                    .keys()
-                    .cloned()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
                     .collect::<Vec<_>>()
                     .into_iter()
-                    .map({
-                        let obj1 = obj.clone();
-                        move |k| {
-                            Ok(Value::Array(Rc::new(RefCell::new(vec![
-                                k.clone(),
-                                obj1.borrow().get_property(&k)?,
-                            ]))))
-                        }
-                    }),
+                    .map(move |(k, v)| Ok(Value::Array(Rc::new(RefCell::new(vec![k, v]))))),
             )),
             Self::String(str) => {
                 let mut idx = 0;
@@ -231,7 +223,17 @@ impl Value {
                     })
                 })))
             }
-            Self::Function(..) => todo!("Make try_iterator use interpreter's lifetime instead and remove it's usage in iter() built-in method"),
+            Self::Function(iter_fn) => Ok(Box::new(std::iter::from_fn(move || {
+                let v = match interpreter.call_function_args(iter_fn.clone(), std::iter::empty()) {
+                    Ok(v) => v,
+                    e => return Some(e),
+                };
+                if let Ok(item) = v.get_property(&Value::Number(0.0)) {
+                    Some(Ok(item))
+                } else {
+                    None
+                }
+            }))),
             _ => Err(ErrorKind::UniterableType(self.type_str())),
         }
     }
