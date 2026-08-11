@@ -10,43 +10,74 @@ use crate::{
 
 impl Codegen {
     pub(crate) fn gen_array(&mut self, arr: &SpanOf<Vec<Element>>) -> Result<()> {
-        let base = self.stack_size().expect("Stack unpredictable.");
+        let base = self.stack_size();
+        let mut dynamic = false; // true when array initialization becomes no longer compile-time predictable
         for elem in arr.1.iter() {
             match elem {
                 Element::Regular(expr) => {
                     self.gen_expr(expr)?;
+                    if dynamic {
+                        self.push_bytecode(SpanOf(expr.span(), Bytecode::AppendArray));
+                    }
                 }
                 Element::Unpack(unpack) => {
+                    if !dynamic {
+                        dynamic = true;
+                        self.push_bytecode(SpanOf(unpack.0, Bytecode::StackToArray(base)));
+                    }
                     self.gen_expr(&unpack.1)?;
-                    self.push_bytecode(SpanOf(unpack.0, Bytecode::UnpackIter));
+                    self.push_bytecode(SpanOf(unpack.0, Bytecode::ExtendArray));
                 }
             }
         }
-        self.push_bytecode(SpanOf(arr.0, Bytecode::StackToArray(base)));
+        if !dynamic {
+            self.push_bytecode(SpanOf(arr.0, Bytecode::StackToArray(base)));
+        }
         Ok(())
     }
     fn gen_object(&mut self, obj: &SpanOf<Vec<Pair>>) -> Result<()> {
-        let base = self.stack_size().expect("Stack unpredictable.");
+        let base = self.stack_size();
+        let mut dynamic = false;
         for pair in obj.1.iter() {
             match pair {
                 Pair::Ident(key, value) => {
-                    self.push_bytecode(SpanOf(
-                        key.0,
-                        Bytecode::LoadStr(ValueStr::interned(&key.get_str())),
-                    ));
+                    if !dynamic {
+                        self.push_bytecode(SpanOf(
+                            key.0,
+                            Bytecode::LoadStr(ValueStr::interned(&key.get_str())),
+                        ));
+                    } // only beneficial on non-dynamic initialization
                     self.gen_expr(value)?;
+                    if dynamic {
+                        self.push_bytecode(SpanOf(
+                            key.0.concat(value.span()),
+                            Bytecode::AppendObj(ValueStr::interned(&key.get_str())),
+                        ));
+                    }
                 }
                 Pair::Index(key, value) => {
                     self.gen_expr(&key.1)?;
                     self.gen_expr(value)?;
+                    if dynamic {
+                        self.push_bytecode(SpanOf(
+                            key.0.concat(value.span()),
+                            Bytecode::AppendObjIndirect,
+                        ));
+                    }
                 }
                 Pair::Unpack(unpack) => {
+                    if !dynamic {
+                        dynamic = true;
+                        self.push_bytecode(SpanOf(unpack.0, Bytecode::StackToObj(base)));
+                    }
                     self.gen_expr(&unpack.1)?;
-                    self.push_bytecode(SpanOf(unpack.0, Bytecode::UnpackPairIter));
+                    self.push_bytecode(SpanOf(unpack.0, Bytecode::ExtendObj));
                 }
             }
         }
-        self.push_bytecode(SpanOf(obj.0, Bytecode::StackToObj(base)));
+        if !dynamic {
+            self.push_bytecode(SpanOf(obj.0, Bytecode::StackToObj(base)));
+        }
         Ok(())
     }
     pub fn gen_expr(&mut self, expr: &Expression) -> Result<()> {
@@ -93,27 +124,44 @@ impl Codegen {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast::Parser, codegen::Codegen, interpreter::bytecode::Bytecode};
+    use std::iter::repeat;
+
+    use crate::{ast::Parser, codegen::Codegen};
 
     #[test]
     fn expr_codegen_test() {
-        let mut parser = Parser::new("[1, 2, *[nil, true], false]".as_bytes());
-        let result = parser.next_expression(false).unwrap().unwrap();
-        let expected = [
-            Bytecode::LoadNum(1.0),
-            Bytecode::LoadNum(2.0),
-            Bytecode::LoadNil,
-            Bytecode::LoadBool(true),
-            Bytecode::StackToArray(2),
-            Bytecode::UnpackIter,
-            Bytecode::LoadBool(false),
-            Bytecode::StackToArray(0),
-        ];
+        let mut parser =
+            Parser::new("[1, 2, *[nil, true], false] {a: 0, b: 1, *c, [d]: 3}".as_bytes());
+        let arr_result = parser.next_expression(false).unwrap().unwrap();
+        let obj_result = parser.next_expression(false).unwrap().unwrap();
+        let expected = r#"LoadNum(1.0)
+        LoadNum(2.0)
+        StackToArray(0)
+        LoadNil
+        LoadBool(true)
+        StackToArray(1)
+        ExtendArray
+        LoadBool(false)
+        AppendArray
+        LoadStr("a")
+        LoadNum(0.0)
+        LoadStr("b")
+        LoadNum(1.0)
+        StackToObj(1)
+        LoadGlobal("c")
+        ExtendObj
+        LoadGlobal("d")
+        LoadNum(3.0)
+        AppendObjIndirect"#
+            .split('\n')
+            .map(str::trim)
+            .chain(repeat(""));
         let mut codegen = Codegen::with_source(parser.source());
-        codegen.gen_expr(&result).unwrap();
+        codegen.gen_expr(&arr_result).unwrap();
+        codegen.gen_expr(&obj_result).unwrap();
         for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
             println!("{:?}", bc.1);
-            assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));
+            assert_eq!(expected, format!("{:?}", bc.1));
         }
     }
 }

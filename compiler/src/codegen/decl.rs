@@ -18,11 +18,11 @@ impl Codegen {
             Declaration::FuncDecl(decl) => self.gen_func_decl(decl)?,
             Declaration::Expression(expr) => {
                 self.gen_expr(expr)?;
-                debug_assert_eq!(self.stack_size(), Some(1));
+                debug_assert_eq!(self.stack_size(), 1);
                 self.push_bytecode(SpanOf(expr.span(), Bytecode::Dup(0)));
             }
         }
-        debug_assert_eq!(self.stack_size(), Some(0));
+        debug_assert_eq!(self.stack_size(), 0);
         Ok(())
     }
     pub(crate) fn create_func_sig(&mut self, decl: &Closure) -> Result<FnSignature> {
@@ -48,7 +48,7 @@ impl Codegen {
             FunctionBody::Expression(expr) => {
                 self.gen_expr(expr)?;
                 self.push_bytecode(SpanOf(expr.span(), Bytecode::Return));
-                debug_assert_eq!(self.stack_size(), Some(0));
+                debug_assert_eq!(self.stack_size(), 0);
             }
         }
 
@@ -75,7 +75,7 @@ impl Codegen {
 
         let sig = self.create_func_sig(&decl.closure)?;
         self.push_bytecode(SpanOf(decl.closure.span(), Bytecode::LoadFn(Rc::new(sig))));
-        debug_assert_eq!(self.stack_size(), Some(1));
+        debug_assert_eq!(self.stack_size(), 1);
         self.push_bytecode(SpanOf(
             decl.span(),
             match decl_id {
@@ -102,7 +102,7 @@ impl Codegen {
         }
 
         self.gen_expr(&decl.assigner)?;
-        debug_assert_eq!(self.stack_size(), Some(1));
+        debug_assert_eq!(self.stack_size(), 1);
         self.push_bytecode(SpanOf(
             decl.span(),
             match decl_id {

@@ -6,7 +6,7 @@ use crate::{
     error::ErrorKind,
     interpreter::{
         string::ValueStr,
-        value::{Function, Object, Value},
+        value::{Function, Value},
         Interpreter,
     },
 };
@@ -22,28 +22,6 @@ fn println(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     print(interpreter)?;
     println!();
     Ok(Value::Nil)
-}
-fn array(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
-    let iter = interpreter.get_local(0).try_iterator(interpreter)?;
-    let array = Value::Array(Rc::new(RefCell::new(iter.collect::<Result<Vec<_>, _>>()?)));
-    Ok(array)
-}
-fn object(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
-    let iter = interpreter
-        .get_local(0)
-        .try_iterator(interpreter)?
-        .map(|value| {
-            let arr = value?.try_array()?;
-            let arr = arr.borrow();
-            Ok((
-                arr.get(0).cloned().unwrap_or_default(),
-                arr.get(1).cloned().unwrap_or_default(),
-            )) as Result<_, ErrorKind>
-        });
-    let obj = Value::Object(Rc::new(RefCell::new(Object::new(
-        iter.collect::<Result<_, _>>()?,
-    )?)));
-    Ok(obj)
 }
 fn length(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let value = interpreter.get_local(0);
@@ -166,8 +144,6 @@ thread_local! {
     pub static GLOBALS: FxHashMap<ValueStr, Rc<Function>> = [
         ("print", 0, true, print as fn(&mut Interpreter) -> Result<Value, ErrorKind>),
         ("println", 0, true, println),
-        ("array", 1, false, array),
-        ("object", 1, false, object),
         ("len", 1, false, length),
         ("setbase", 2, false, set_base_obj),
         ("getbase", 1, false, get_base_obj),

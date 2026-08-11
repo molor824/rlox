@@ -26,7 +26,7 @@ struct Scope {
 struct FnFrame {
     locals: Vec<ValueStr>,
     scopes: Vec<Scope>,
-    stack_size: Option<usize>, // try to predict, however prediction can fail throughout the generation for iterator unpacking bytecode
+    stack_size: usize,
     upvalues: Vec<(ValueStr, UpvalueLoc)>,
     bytecodes: Vec<SpanOf<Bytecode>>,
 }
@@ -35,7 +35,7 @@ impl Default for FnFrame {
         Self {
             locals: vec![],
             scopes: vec![],
-            stack_size: Some(0),
+            stack_size: 0,
             upvalues: vec![],
             bytecodes: vec![],
         }
@@ -112,8 +112,11 @@ impl Codegen {
             _ => None,
         }
     }
-    fn stack_size(&self) -> Option<usize> {
+    fn stack_size(&self) -> usize {
         self.last_frame().stack_size
+    }
+    fn stack_size_mut(&mut self) -> &mut usize {
+        &mut self.last_frame_mut().stack_size
     }
     fn get_local_var(&self, name: ValueStr) -> Option<usize> {
         self.last_frame().get_local_var(name)
@@ -160,13 +163,13 @@ impl Codegen {
             body: FnBody::Bytecode(frame.bytecodes),
         }
     }
-    pub fn next_stack(bc: &Bytecode, stack: Option<usize>) -> Option<usize> {
+    pub fn next_stack(bc: &Bytecode, stack: usize) -> usize {
         match bc {
             Bytecode::Call(base)
             | Bytecode::StackToArray(base)
             | Bytecode::StackToObj(base)
-            | Bytecode::CallBuiltin(base, _) => Some(*base + 1),
-            Bytecode::Dup(n) => stack.map(|s| s - 1 + *n),
+            | Bytecode::CallBuiltin(base, _) => *base + 1,
+            Bytecode::Dup(n) => stack - 1 + *n,
             Bytecode::LoadBool(..)
             | Bytecode::LoadFn(..)
             | Bytecode::LoadGlobal(..)
@@ -174,16 +177,21 @@ impl Codegen {
             | Bytecode::LoadNil
             | Bytecode::LoadNum(..)
             | Bytecode::LoadStr(..)
-            | Bytecode::LoadUpvalue(..) => stack.map(|s| s + 1),
+            | Bytecode::LoadUpvalue(..) => stack + 1,
             Bytecode::StoreGlobal(..)
             | Bytecode::StoreLocal(..)
             | Bytecode::StoreUpvalue(..)
             | Bytecode::Return
             | Bytecode::Binary(..)
             | Bytecode::BranchIf(..)
-            | Bytecode::LoadPropertyIndirect => stack.map(|s| s - 1),
-            Bytecode::StoreProperty(..) => stack.map(|s| s - 2),
-            Bytecode::StorePropertyIndirect => stack.map(|s| s - 3),
+            | Bytecode::LoadPropertyIndirect
+            | Bytecode::CallVariadic
+            | Bytecode::AppendArray
+            | Bytecode::ExtendArray
+            | Bytecode::AppendObj(..)
+            | Bytecode::ExtendObj => stack - 1,
+            Bytecode::StoreProperty(..) | Bytecode::AppendObjIndirect => stack - 2,
+            Bytecode::StorePropertyIndirect => stack - 3,
             Bytecode::Truncate(..)
             | Bytecode::Nop
             | Bytecode::Jump(..)
@@ -192,7 +200,6 @@ impl Codegen {
             | Bytecode::Unary(..)
             | Bytecode::LoadProperty(..)
             | Bytecode::LoadMethod(..) => stack,
-            Bytecode::UnpackIter | Bytecode::UnpackPairIter => None,
         }
     }
 }

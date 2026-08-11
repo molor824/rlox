@@ -182,60 +182,45 @@ impl Value {
             v => Err(ErrorKind::InvalidType(v.type_str(), "object")),
         }
     }
-    pub fn try_iterator<'a>(
+    pub fn try_iterate(
         self,
-        interpreter: &'a mut Interpreter,
-    ) -> Result<Box<dyn Iterator<Item = Result<Value, ErrorKind>> + 'a>, ErrorKind> {
+        interpreter: &mut Interpreter,
+        mut callback: impl FnMut(&mut Interpreter, Value) -> Result<(), ErrorKind>,
+    ) -> Result<(), ErrorKind> {
         match self {
             Self::Array(arr) => {
-                let len = arr.borrow().len();
-                let mut index = 0;
-                Ok(Box::new(std::iter::from_fn(move || {
-                    if index >= len {
-                        return None;
-                    }
-                    let i = index;
-                    index += 1;
-                    Some(Ok(arr.borrow().get(i).cloned().unwrap_or_default()))
-                })))
-            }
-            Self::Object(obj) => Ok(Box::new(
-                obj.borrow()
-                    .map
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .map(move |(k, v)| Ok(Value::Array(Rc::new(RefCell::new(vec![k, v]))))),
-            )),
-            Self::String(str) => {
-                let mut idx = 0;
-                Ok(Box::new(std::iter::from_fn(move || {
-                    let mut chars = str.as_str()[idx..].chars();
-                    let ch = chars.next();
-                    ch.map(|ch| {
-                        idx += ch.len_utf8();
-                        let mut buffer = [0u8; 4];
-
-                        Ok(Value::String(ValueStr::from(
-                            ch.encode_utf8(&mut buffer) as &str
-                        )))
-                    })
-                })))
-            }
-            Self::Function(iter_fn) => Ok(Box::new(std::iter::from_fn(move || {
-                let v = match interpreter.call_function_args(iter_fn.clone(), std::iter::empty()) {
-                    Ok(v) => v,
-                    e => return Some(e),
-                };
-                if let Ok(item) = v.get_property(&Value::Number(0.0)) {
-                    Some(Ok(item))
-                } else {
-                    None
+                for v in arr.borrow().iter() {
+                    callback(interpreter, v.clone())?;
                 }
-            }))),
-            _ => Err(ErrorKind::UniterableType(self.type_str())),
+            }
+            Self::Object(obj) => {
+                for (k, v) in obj.borrow().map.iter() {
+                    callback(
+                        interpreter,
+                        Value::Array(Rc::new(RefCell::new(vec![k.clone(), v.clone()]))),
+                    )?;
+                }
+            }
+            Self::String(str) => {
+                let str = str.as_str();
+                for (i, ch) in str.char_indices() {
+                    callback(
+                        interpreter,
+                        Value::String(str[i..(i + ch.len_utf8())].into()),
+                    )?;
+                }
+            }
+            Self::Function(iter_fn) => loop {
+                let value = interpreter.call_function_args(iter_fn.clone(), [])?;
+                if value == Value::Nil {
+                    break;
+                }
+                let item = value.get_property(&Value::Number(0.0))?;
+                callback(interpreter, item)?;
+            },
+            _ => return Err(ErrorKind::UniterableType(self.type_str())),
         }
+        Ok(())
     }
     pub fn try_add(&self, other: &Self) -> Result<Self, ErrorKind> {
         let error = || {

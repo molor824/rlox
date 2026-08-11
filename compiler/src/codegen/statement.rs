@@ -51,7 +51,7 @@ impl Codegen {
                 self.push_scope(ScopeKind::Block);
 
                 self.gen_expr(condition)?;
-                debug_assert_eq!(self.stack_size(), Some(1));
+                debug_assert_eq!(self.stack_size(), 1);
 
                 let br_index = self.bytecodes().len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::BranchIf(false, 0)));
@@ -91,7 +91,7 @@ impl Codegen {
                 self.push_scope(ScopeKind::Loop);
 
                 self.gen_expr(condition)?;
-                debug_assert_eq!(self.stack_size(), Some(1));
+                debug_assert_eq!(self.stack_size(), 1);
 
                 let break_start = self.bytecodes().len();
                 self.push_bytecode(SpanOf(condition.span(), Bytecode::BranchIf(false, 0)));
@@ -182,6 +182,7 @@ impl Codegen {
                 self.push_bytecode(SpanOf(ident.0, Bytecode::Binary(BinaryOp::SetNe)));
                 let break_start = self.bytecodes().len();
                 self.push_bytecode(SpanOf(ident.0, Bytecode::BranchIf(false, 0)));
+                let cond_stack = self.stack_size();
                 // Condition met
                 self.push_bytecode(SpanOf(ident.0, Bytecode::LoadNum(0.0)));
                 self.push_bytecode(SpanOf(ident.0, Bytecode::LoadPropertyIndirect));
@@ -198,12 +199,15 @@ impl Codegen {
                 self.bytecodes_mut()[break_start].1 =
                     Bytecode::BranchIf(false, break_end as isize - break_start as isize);
 
+                *self.stack_size_mut() = cond_stack; // To keep the stack same as the condition failed state.
+                self.push_bytecode(SpanOf(block.0, Bytecode::Dup(0)));
+
                 self.pop_scope();
 
                 self.pop_scope();
             }
         }
-        debug_assert_eq!(self.stack_size(), Some(0));
+        debug_assert_eq!(self.stack_size(), 0);
         Ok(())
     }
 }

@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
 use crate::interpreter::value::{Function, Object, Value};
-use crate::interpreter::{FnSignature, Interpreter};
+use crate::interpreter::{Cell, FnSignature, Interpreter};
 use std::cell::RefCell;
 use std::mem::replace;
 use std::rc::Rc;
@@ -84,10 +84,15 @@ pub enum Bytecode {
     LoadMethod(ValueStr), // obj -> (\... -> obj[key](obj[key], ...))
     // Array initialization
     StackToArray(usize), // starting at .0 offset: s0, s1, s2, ... -> [s0, s1, s2, ...]
-    UnpackIter, // s0 -> *iter(s0)
+    // Array initialization for unpacking, might introduce unpredictable stack
+    AppendArray, // arr, v -> arr:append(v);
+    ExtendArray, // arr, iter -> arr:extend(iter);
     // Object initialization
     StackToObj(usize), // starting at .0 offset: k0, v0, k1, v1, ... -> {k0: v0, k1: v1, ...}
-    UnpackPairIter, // so -> **iter(s0) where iter should produce [k0, v0] pairs to be unpacked twice
+    // Object initialization for unpacking, which introduces unpredictable stack
+    AppendObj(ValueStr), // obj, val -> obj[.0] = val;
+    AppendObjIndirect, // obj, key, val -> obj[key] = val;
+    ExtendObj, // obj, iter -> obj:extend(iter);
     LoadNil,
     LoadBool(bool),
     LoadNum(f64),
@@ -97,7 +102,8 @@ pub enum Bytecode {
     Jump(isize), // pc += .0
     // Function call
     Call(usize), // starting at .0 offset: func, p0, p1, p2, ... -> func(p0, p1, p2, ...)
-    CallBuiltin(usize, Rc<Function>),
+    CallVariadic, // func, params -> func(*params)
+    CallBuiltin(usize, Rc<Function>), // starting at .0 offset: p0, p1, p2, ... -> .1(p0, p1, p2, ...)
     // Return
     Return, // v0 -> return(v0);
 }
@@ -117,38 +123,44 @@ impl Bytecode {
                     interpreter.push_stack(v.clone());
                 }
             }
-            Bytecode::UnpackIter => {
-                let mut tmp_stack = replace(&mut interpreter.stack, vec![]);
-                let tmp_stack_base = replace(
-                    &mut interpreter.current_frame.as_mut().unwrap().base_stack,
-                    0,
-                );
-                let iter = interpreter.pop_stack().try_iterator(interpreter)?;
-                tmp_stack.reserve(iter.size_hint().0);
-                for v in iter {
-                    tmp_stack.push(v?);
-                }
-
-                interpreter.stack = tmp_stack;
-                interpreter.current_frame.as_mut().unwrap().base_stack = tmp_stack_base;
+            Bytecode::ExtendArray => {
+                let iter = interpreter.pop_stack();
+                let array = interpreter.pop_stack().try_array()?;
+                iter.try_iterate(interpreter, |_, v| Ok(array.borrow_mut().push(v)))?;
+                interpreter.push_stack(Value::Array(array));
             }
-            Bytecode::UnpackPairIter => {
-                let mut tmp_stack = replace(&mut interpreter.stack, vec![]);
-                let tmp_stack_base = replace(
-                    &mut interpreter.current_frame.as_mut().unwrap().base_stack,
-                    0,
-                );
-                let iter = interpreter.pop_stack().try_iterator(interpreter)?;
-                tmp_stack.reserve(iter.size_hint().0 * 2);
-                for v in iter {
-                    let v = v?;
-                    let key = v.get_property(&Value::Number(0.0))?;
-                    let value = v.get_property(&Value::Number(1.0))?;
-                    tmp_stack.extend([key, value]);
-                }
+            Bytecode::ExtendObj => {
+                let iter = interpreter.pop_stack();
+                let object = interpreter.pop_stack();
+                iter.try_iterate(interpreter, |_, pair| {
+                    let k = pair.get_property(&Value::Number(0.0))?;
+                    let v = pair.get_property(&Value::Number(1.0))?;
+                    object.set_property(k, v)?;
+                    Ok(())
+                })?;
+                interpreter.push_stack(object);
+            }
+            Bytecode::AppendArray => {
+                let value = interpreter.pop_stack();
+                let array = interpreter.pop_stack().try_array()?;
 
-                interpreter.stack = tmp_stack;
-                interpreter.current_frame.as_mut().unwrap().base_stack = tmp_stack_base;
+                array.borrow_mut().push(value);
+                interpreter.push_stack(Value::Array(array));
+            }
+            Bytecode::AppendObj(str) => {
+                let value = interpreter.pop_stack();
+                let obj = interpreter.pop_stack();
+
+                obj.set_property(Value::String(str.clone()), value)?;
+                interpreter.push_stack(obj);
+            }
+            Bytecode::AppendObjIndirect => {
+                let value = interpreter.pop_stack();
+                let key = interpreter.pop_stack();
+                let obj = interpreter.pop_stack();
+
+                obj.set_property(key, value)?;
+                interpreter.push_stack(obj);
             }
             Bytecode::Binary(op) => {
                 let b = interpreter.pop_stack();
@@ -250,15 +262,11 @@ impl Bytecode {
             }
             Bytecode::StackToObj(base) => {
                 let map = interpreter.stack[*base..]
-                    .chunks_mut(2)
+                    .chunks_exact_mut(2)
                     .map(|pair| {
                         (
-                            pair.get_mut(0)
-                                .map(|k| replace(k, Value::Nil))
-                                .unwrap_or_default(),
-                            pair.get_mut(1)
-                                .map(|v| replace(v, Value::Nil))
-                                .unwrap_or_default(),
+                            replace(&mut pair[0], Value::Nil),
+                            replace(&mut pair[1], Value::Nil),
                         )
                     })
                     .collect::<FxHashMap<_, _>>();
@@ -278,6 +286,17 @@ impl Bytecode {
             Bytecode::Call(base) => {
                 let v = interpreter.call_function(*base)?;
                 interpreter.push_stack(v);
+            }
+            Bytecode::CallVariadic => {
+                let params = interpreter.pop_stack();
+                let func = interpreter.pop_stack().try_function()?;
+                let abs_base_ptr = interpreter.memory.len();
+                let abs_base_stack = interpreter.stack.len();
+
+                params.try_iterate(interpreter, |int, v| Ok(int.memory.push(Cell::Value(v))))?;
+                let ret =
+                    interpreter.call_function_unchecked(func, abs_base_ptr, abs_base_stack)?;
+                interpreter.push_stack(ret);
             }
             Bytecode::CallBuiltin(base, func) => {
                 let v = interpreter.call_builtin_function(func.clone(), *base)?;

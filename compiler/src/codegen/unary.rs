@@ -19,21 +19,26 @@ impl Codegen {
 
         match operator {
             PostfixOperator::Call(args) => {
-                let base = self.stack_size().expect("Stack unpredictable.") - 1;
+                let base = self.stack_size() - 1;
 
-                for arg in args.1.iter() {
-                    match arg {
-                        Element::Regular(r) => {
-                            self.gen_expr(r)?;
-                        }
-                        Element::Unpack(u) => {
-                            self.gen_expr(&u.1)?;
-                            self.push_bytecode(SpanOf(u.0, Bytecode::UnpackIter));
-                        }
+                let regular_args = args
+                    .1
+                    .iter()
+                    .map(|arg| match arg {
+                        Element::Regular(reg) => Some(reg),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>();
+
+                if let Some(reg_args) = regular_args {
+                    for arg in reg_args {
+                        self.gen_expr(arg)?;
                     }
+                    self.push_bytecode(SpanOf(args.0, Bytecode::Call(base)));
+                } else {
+                    self.gen_array(args)?;
+                    self.push_bytecode(SpanOf(args.0, Bytecode::CallVariadic));
                 }
-
-                self.push_bytecode(SpanOf(args.0, Bytecode::Call(base)));
             }
             PostfixOperator::Index(index) => {
                 self.gen_expr(&index.1)?;
@@ -102,7 +107,6 @@ mod tests {
             Bytecode::LoadNum(4.0),
             Bytecode::LoadNum(5.0),
             Bytecode::LoadGlobal(ValueStr::interned("rest")),
-            Bytecode::UnpackIter,
             Bytecode::Call(0),
             Bytecode::Unary(UnaryOp::SetFalse),
             Bytecode::Unary(UnaryOp::Swap),

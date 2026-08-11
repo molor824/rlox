@@ -257,7 +257,6 @@ impl Interpreter {
                     let Some(bc) = bytecodes.get(index) else {
                         break Value::Nil;
                     };
-                    println!("{}: {:?}", index, bc.1);
                     match bc.1.interpret(self, index)? {
                         Ok(next) => index = next,
                         Err(ret) => break ret,
