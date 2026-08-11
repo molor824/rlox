@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, mem::replace, rc::Rc};
 
 use rustc_hash::FxHashMap;
 
@@ -13,12 +13,7 @@ use crate::{
 
 fn print(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let args = interpreter.get_local(0).try_array()?;
-    let mut first = true;
     for arg in args.borrow().iter() {
-        if !first {
-            print!(" ");
-        }
-        first = false;
         print!("{}", arg);
     }
     Ok(Value::Nil)
@@ -142,7 +137,10 @@ fn iter(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
 }
 fn range(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let mut start = interpreter.get_local(0).try_num().ok().unwrap_or_default();
-    let end = interpreter.get_local(1).try_num().ok().unwrap_or_default();
+    let end = match interpreter.get_local(1).try_num().ok() {
+        Some(n) => n,
+        None => replace(&mut start, 0.0),
+    };
     let step = interpreter
         .get_local(2)
         .try_num()

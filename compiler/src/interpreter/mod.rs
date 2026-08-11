@@ -129,6 +129,9 @@ impl Interpreter {
     }
     fn make_local_upvalue(&mut self, id: usize) -> Rc<RefCell<Value>> {
         let index = self.base_pointer() + id as usize;
+        if self.memory.len() <= index {
+            self.memory.resize_with(index + 1, Cell::default);
+        }
         let cell = &mut self.memory[index];
         match cell {
             Cell::Upvalue(val) => val.clone(),
@@ -236,12 +239,12 @@ impl Interpreter {
     fn call_function_unchecked(
         &mut self,
         function: Rc<Function>,
-        base_pointer: usize,
-        base_stack: usize,
+        abs_base_ptr: usize,
+        abs_base_stack: usize,
     ) -> Result<Value, ErrorKind> {
         let mut old_frame = Some(FunctionFrame {
-            base_pointer,
-            base_stack,
+            base_pointer: abs_base_ptr,
+            base_stack: abs_base_stack,
             function: function.clone(),
         });
         mem::swap(&mut old_frame, &mut self.current_frame);
@@ -254,6 +257,7 @@ impl Interpreter {
                     let Some(bc) = bytecodes.get(index) else {
                         break Value::Nil;
                     };
+                    println!("{}: {:?}", index, bc.1);
                     match bc.1.interpret(self, index)? {
                         Ok(next) => index = next,
                         Err(ret) => break ret,
@@ -267,34 +271,56 @@ impl Interpreter {
 
         Ok(return_value)
     }
-    fn call_function(&mut self, base_stack: usize) -> Result<Value, ErrorKind> {
-        let next_base_stack = base_stack + self.base_stack();
-        let base_pointer = self.memory.len();
-        let function = self.stack[next_base_stack].try_function()?;
+    fn stack_arg_to_memory(&mut self, base_stack: usize, arity: usize, variadic: bool) {
+        let absolute_base_stack = base_stack + self.base_stack();
         let stack_len = self.stack.len();
-        let base_param = next_base_stack + 1;
 
-        let iter = self.stack[base_param..((base_param + function.signature.arity).min(stack_len))]
-            .iter_mut();
-        self.memory
-            .extend(iter.map(|elem| Cell::Value(replace(elem, Value::Nil))));
+        let iter = self.stack[absolute_base_stack..(absolute_base_stack + arity).min(stack_len)]
+            .iter_mut()
+            .map(|elem| Cell::Value(replace(elem, Value::Nil)))
+            .chain(std::iter::repeat_with(Cell::default))
+            .take(arity);
+        self.memory.extend(iter);
 
-        if function.signature.variadic {
+        if variadic {
             let array = Value::Array(Rc::new(RefCell::new(
-                self.stack[(base_param + function.signature.arity)..]
+                self.stack[(absolute_base_stack + arity)..]
                     .iter_mut()
                     .map(|elem| replace(elem, Value::Nil))
                     .collect::<Vec<_>>(),
             )));
-            let loc = base_pointer + function.signature.arity;
-            if self.memory.len() <= loc {
-                self.memory.resize_with(loc + 1, Cell::default);
-            }
-            self.memory[loc] = Cell::Value(array);
+            self.memory.push(Cell::Value(array));
         }
-        self.stack.truncate(next_base_stack);
+        self.stack.truncate(absolute_base_stack);
+    }
+    fn call_builtin_function(
+        &mut self,
+        function: Rc<Function>,
+        base_stack: usize,
+    ) -> Result<Value, ErrorKind> {
+        let abs_base_ptr = self.memory.len();
+        let abs_base_stack = base_stack + self.base_stack();
+        self.stack_arg_to_memory(
+            base_stack,
+            function.signature.arity,
+            function.signature.variadic,
+        );
 
-        self.call_function_unchecked(function, base_pointer, next_base_stack)
+        self.call_function_unchecked(function, abs_base_ptr, abs_base_stack)
+    }
+    fn call_function(&mut self, base_stack: usize) -> Result<Value, ErrorKind> {
+        let abs_base_stack = base_stack + self.base_stack();
+        let abs_base_pointer = self.memory.len();
+        let function = self.stack[abs_base_stack].try_function()?;
+
+        self.stack_arg_to_memory(
+            base_stack + 1,
+            function.signature.arity,
+            function.signature.variadic,
+        );
+        self.stack.truncate(abs_base_stack);
+
+        self.call_function_unchecked(function, abs_base_pointer, abs_base_stack)
     }
     pub fn call_function_args(
         &mut self,

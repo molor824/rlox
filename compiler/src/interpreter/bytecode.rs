@@ -280,11 +280,7 @@ impl Bytecode {
                 interpreter.push_stack(v);
             }
             Bytecode::CallBuiltin(base, func) => {
-                let v = interpreter.call_function_unchecked(
-                    func.clone(),
-                    interpreter.memory.len(),
-                    *base,
-                )?;
+                let v = interpreter.call_builtin_function(func.clone(), *base)?;
                 interpreter.push_stack(v);
             }
         }

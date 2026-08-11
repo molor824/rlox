@@ -183,6 +183,8 @@ impl Codegen {
                 let break_start = self.bytecodes().len();
                 self.push_bytecode(SpanOf(ident.0, Bytecode::BranchIf(false, 0)));
                 // Condition met
+                self.push_bytecode(SpanOf(ident.0, Bytecode::LoadNum(0.0)));
+                self.push_bytecode(SpanOf(ident.0, Bytecode::LoadPropertyIndirect));
                 self.push_bytecode(SpanOf(ident.0, Bytecode::StoreLocal(ident_id)));
 
                 for stmt in block.1.iter() {
