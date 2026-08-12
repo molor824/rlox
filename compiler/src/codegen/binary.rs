@@ -22,7 +22,7 @@ impl Codegen {
                 self.push_bytecode(SpanOf(left_operand.span(), Bytecode::Dup(2)));
 
                 let condition_bytecode = self.bytecodes().len();
-                self.push_bytecode(SpanOf(operator.0, Bytecode::Nop));
+                self.push_bytecode(SpanOf(operator.0, Bytecode::BranchIf(false, 0)));
 
                 self.push_bytecode(SpanOf(operator.0, Bytecode::Dup(0)));
                 self.gen_expr(right_operand)?;
@@ -167,6 +167,7 @@ mod tests {
         codegen
             .gen_expr(&parser.next_expression(false).unwrap().unwrap())
             .unwrap();
+
         for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
             assert_eq!(format!("{:?}", expected), format!("{:?}", bc.1));

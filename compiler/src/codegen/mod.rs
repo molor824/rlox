@@ -193,7 +193,6 @@ impl Codegen {
             Bytecode::StoreProperty(..) | Bytecode::AppendObjIndirect => stack - 2,
             Bytecode::StorePropertyIndirect => stack - 3,
             Bytecode::Truncate(..)
-            | Bytecode::Nop
             | Bytecode::Jump(..)
             | Bytecode::GlobalDeclare(..)
             | Bytecode::GlobalReadOnly(..)

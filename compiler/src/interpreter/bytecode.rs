@@ -56,7 +56,6 @@ pub enum UnaryOp {
 /// Operational instructions only access the local memory, where it's relative to the base function pointer.
 /// The memory automatically grows if the memory index is past the stack pointer.
 pub enum Bytecode {
-    Nop,
     Dup(usize), // s0 -> [s0; .0]
     // Binary operations
     Binary(BinaryOp), // s0, s1 -> <BINARY> s0 s1
@@ -116,7 +115,6 @@ impl Bytecode {
         index: usize,
     ) -> Result<Result<usize, Value>, ErrorKind> {
         match self {
-            Bytecode::Nop => {}
             Bytecode::Dup(n) => {
                 let v = interpreter.pop_stack();
                 for _ in 0..*n {
@@ -252,16 +250,18 @@ impl Bytecode {
             }
             Bytecode::LoadStr(s) => interpreter.push_stack(Value::String(s.clone())),
             Bytecode::StackToArray(base) => {
-                let vec = interpreter.stack[*base..]
+                let abs_base = *base + interpreter.base_stack();
+                let vec = interpreter.stack[abs_base..]
                     .iter_mut()
                     .map(|v| replace(v, Value::Nil))
                     .collect::<Vec<_>>();
 
-                interpreter.stack.truncate(*base);
+                interpreter.stack.truncate(abs_base);
                 interpreter.push_stack(Value::Array(Rc::new(RefCell::new(vec))));
             }
             Bytecode::StackToObj(base) => {
-                let map = interpreter.stack[*base..]
+                let abs_base = *base + interpreter.base_stack();
+                let map = interpreter.stack[abs_base..]
                     .chunks_exact_mut(2)
                     .map(|pair| {
                         (
@@ -271,7 +271,7 @@ impl Bytecode {
                     })
                     .collect::<FxHashMap<_, _>>();
 
-                interpreter.stack.truncate(*base);
+                interpreter.stack.truncate(abs_base);
                 interpreter.push_stack(Value::Object(Rc::new(RefCell::new(Object::new(map)?))));
             }
             Bytecode::BranchIf(cond, offset) => {

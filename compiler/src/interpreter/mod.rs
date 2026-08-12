@@ -174,8 +174,7 @@ impl Interpreter {
         Ok(())
     }
     fn truncate(&mut self, new_len: usize) {
-        let base = self.base_pointer();
-        self.memory.truncate(new_len + base);
+        self.memory.truncate(new_len + self.base_pointer());
     }
     fn base_pointer(&self) -> usize {
         self.current_frame
@@ -257,6 +256,17 @@ impl Interpreter {
                     let Some(bc) = bytecodes.get(index) else {
                         break Value::Nil;
                     };
+                    if cfg!(debug_assertions) {
+                        println!(
+                            "{:?}: [{}]",
+                            bc.1,
+                            self.stack[self.base_stack()..]
+                                .iter()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        );
+                    }
                     match bc.1.interpret(self, index)? {
                         Ok(next) => index = next,
                         Err(ret) => break ret,

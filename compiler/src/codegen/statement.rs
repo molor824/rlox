@@ -63,7 +63,7 @@ impl Codegen {
                 // If else exists, add jump to skip it
                 let skip_index = else_block.as_ref().map(|_| {
                     let idx = self.bytecodes().len();
-                    self.push_bytecode(SpanOf(met_block.0, Bytecode::Nop));
+                    self.push_bytecode(SpanOf(met_block.0, Bytecode::Jump(0)));
                     idx
                 });
 
@@ -298,15 +298,18 @@ mod tests {
         Dup(2)
         LoadNil
         Binary(SetNe)
-        BranchIf(false, 7)
+        BranchIf(false, 9)
+        LoadNum(0.0)
+        LoadPropertyIndirect
         StoreLocal(1)
         LoadGlobal("print")
         LoadLocal(1)
         Call(0)
         Dup(0)
-        Jump(-11)
+        Jump(-13)
+        Dup(0)
         Truncate(1)
-        Truncate(0)"#.split('\n').map(str::trim);
+        Truncate(0)"#.split('\n').map(str::trim).chain(std::iter::repeat("Nop"));
 
         for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);
@@ -371,7 +374,7 @@ mod tests {
             Dup(0)"#
             .split("\n")
             .map(str::trim)
-            .collect::<Vec<_>>();
+            .chain(std::iter::repeat("Nop"));
 
         for (bc, expected) in codegen.bytecodes().iter().zip(expected) {
             println!("{:?}", bc.1);

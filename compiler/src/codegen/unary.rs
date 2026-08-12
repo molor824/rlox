@@ -106,12 +106,16 @@ mod tests {
             Bytecode::Call(0),
             Bytecode::LoadNum(4.0),
             Bytecode::LoadNum(5.0),
+            Bytecode::StackToArray(1),
             Bytecode::LoadGlobal(ValueStr::interned("rest")),
-            Bytecode::Call(0),
+            Bytecode::ExtendArray,
+            Bytecode::CallVariadic,
             Bytecode::Unary(UnaryOp::SetFalse),
             Bytecode::Unary(UnaryOp::Swap),
             Bytecode::Unary(UnaryOp::Negate),
-        ];
+        ]
+        .into_iter()
+        .chain(std::iter::repeat(Bytecode::Dup(1)));
         let mut codegen = Codegen::with_source(parser.source());
         codegen.gen_expr(&result).unwrap();
         for (bc, expected) in codegen.bytecodes().into_iter().zip(expected) {
