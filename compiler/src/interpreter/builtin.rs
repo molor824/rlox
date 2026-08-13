@@ -1,4 +1,4 @@
-use std::{cell::RefCell, mem::replace, rc::Rc};
+use std::{cell::RefCell, fmt::Write, mem::replace, rc::Rc};
 
 use rustc_hash::FxHashMap;
 
@@ -12,7 +12,7 @@ use crate::{
 };
 
 fn print(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
-    let args = interpreter.get_local(0).try_array()?;
+    let args = interpreter.get_local(0).try_array().unwrap();
     for arg in args.borrow().iter() {
         print!("{}", arg);
     }
@@ -22,6 +22,14 @@ fn println(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     print(interpreter)?;
     println!();
     Ok(Value::Nil)
+}
+fn str(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    let args = interpreter.get_local(0).try_array().unwrap();
+    let mut string = String::with_capacity(args.borrow().len());
+    for arg in args.borrow().iter() {
+        write!(string, "{}", arg).unwrap();
+    }
+    Ok(Value::String(ValueStr::from(string.as_str())))
 }
 fn length(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
     let value = interpreter.get_local(0);
@@ -150,6 +158,7 @@ thread_local! {
         ("sqrt", 1, false, sqrt),
         ("iter", 1, false, iter),
         ("range", 3, false, range),
+        ("str", 0, true, str),
     ].into_iter().map(|(name, arity, variadic, ptr)| (
         ValueStr::interned(name),
         Rc::new(Interpreter::create_builtin_function(arity, variadic, ptr))

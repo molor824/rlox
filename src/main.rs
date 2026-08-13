@@ -1,5 +1,5 @@
 use compiler::{ast::Parser, codegen::Codegen, interpreter::Interpreter};
-use std::{env, error::Error, fs, io::BufReader, process::exit, rc::Rc};
+use std::{env, error::Error, fs, io::BufReader, process::exit, rc::Rc, sync::atomic::Ordering};
 
 fn print_err_exit(err: impl Error) -> ! {
     eprintln!("{err}");
@@ -25,6 +25,8 @@ fn main() {
             }
         }
     }
+
+    compiler::DEBUG_MODE.store(debug, Ordering::Relaxed);
 
     let file_path = match &file_path {
         Some(f) => f,

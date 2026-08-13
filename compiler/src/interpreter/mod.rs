@@ -2,11 +2,13 @@ use core::fmt;
 use std::cell::RefCell;
 use std::mem::{self, replace};
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
 use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
 use crate::interpreter::{bytecode::Bytecode, value::Function, value::Value};
 use crate::span::SpanOf;
+use crate::DEBUG_MODE;
 use rustc_hash::FxHashMap;
 
 pub mod builtin;
@@ -107,7 +109,7 @@ impl Interpreter {
         if self.stack.len() <= self.base_stack() {
             return Value::Nil;
         }
-        self.stack.pop().expect("Stack underflow")
+        self.stack.pop().unwrap_or_default()
     }
     fn get_local(&self, id: usize) -> Value {
         let absolute_id = self.base_pointer() + id as usize;
@@ -192,11 +194,11 @@ impl Interpreter {
 
             interpreter.set_local(arity, itself.clone());
             interpreter.memory[base_pointer..].rotate_right(1);
-            interpreter.call_function_unchecked(
-                function1.clone(),
+            interpreter.call_with_frame(FunctionFrame {
                 base_pointer,
-                interpreter.stack.len(),
-            )
+                base_stack: interpreter.stack.len(),
+                function: function1.clone(),
+            })
         };
         Self::create_builtin_function(
             function.signature.arity + 1,
@@ -235,17 +237,9 @@ impl Interpreter {
             upvalues: vec![],
         }
     }
-    fn call_function_unchecked(
-        &mut self,
-        function: Rc<Function>,
-        abs_base_ptr: usize,
-        abs_base_stack: usize,
-    ) -> Result<Value, ErrorKind> {
-        let mut old_frame = Some(FunctionFrame {
-            base_pointer: abs_base_ptr,
-            base_stack: abs_base_stack,
-            function: function.clone(),
-        });
+    fn call_with_frame(&mut self, frame: FunctionFrame) -> Result<Value, ErrorKind> {
+        let function = frame.function.clone();
+        let mut old_frame = Some(frame);
         mem::swap(&mut old_frame, &mut self.current_frame);
 
         let return_value = match &function.signature.body {
@@ -256,11 +250,11 @@ impl Interpreter {
                     let Some(bc) = bytecodes.get(index) else {
                         break Value::Nil;
                     };
-                    if cfg!(debug_assertions) {
+                    if DEBUG_MODE.load(Ordering::Relaxed) {
                         println!(
                             "{:?}: [{}]",
                             bc.1,
-                            self.stack[self.base_stack()..]
+                            self.stack
                                 .iter()
                                 .map(|v| v.to_string())
                                 .collect::<Vec<_>>()
@@ -280,11 +274,18 @@ impl Interpreter {
 
         Ok(return_value)
     }
-    fn stack_arg_to_memory(&mut self, base_stack: usize, arity: usize, variadic: bool) {
-        let absolute_base_stack = base_stack + self.base_stack();
+    fn call_stack_args(
+        &mut self,
+        function: Rc<Function>,
+        stack_base: usize,
+    ) -> Result<Value, ErrorKind> {
+        let abs_stack = stack_base + self.base_stack();
+        let abs_ptr = self.memory.len();
         let stack_len = self.stack.len();
+        let arity = function.signature.arity;
+        let variadic = function.signature.variadic;
 
-        let iter = self.stack[absolute_base_stack..(absolute_base_stack + arity).min(stack_len)]
+        let iter = self.stack[abs_stack..(abs_stack + arity).min(stack_len)]
             .iter_mut()
             .map(|elem| Cell::Value(replace(elem, Value::Nil)))
             .chain(std::iter::repeat_with(Cell::default))
@@ -293,55 +294,38 @@ impl Interpreter {
 
         if variadic {
             let array = Value::Array(Rc::new(RefCell::new(
-                self.stack[(absolute_base_stack + arity)..]
+                self.stack[(abs_stack + arity)..]
                     .iter_mut()
                     .map(|elem| replace(elem, Value::Nil))
                     .collect::<Vec<_>>(),
             )));
             self.memory.push(Cell::Value(array));
         }
-        self.stack.truncate(absolute_base_stack);
+        self.stack.truncate(abs_stack);
+
+        self.call_with_frame(FunctionFrame {
+            base_pointer: abs_ptr,
+            base_stack: abs_stack,
+            function,
+        })
     }
-    fn call_builtin_function(
-        &mut self,
-        function: Rc<Function>,
-        base_stack: usize,
-    ) -> Result<Value, ErrorKind> {
-        let abs_base_ptr = self.memory.len();
-        let abs_base_stack = base_stack + self.base_stack();
-        self.stack_arg_to_memory(
-            base_stack,
-            function.signature.arity,
-            function.signature.variadic,
-        );
-
-        self.call_function_unchecked(function, abs_base_ptr, abs_base_stack)
-    }
-    fn call_function(&mut self, base_stack: usize) -> Result<Value, ErrorKind> {
-        let abs_base_stack = base_stack + self.base_stack();
-        let abs_base_pointer = self.memory.len();
-        let function = self.stack[abs_base_stack].try_function()?;
-
-        self.stack_arg_to_memory(
-            base_stack + 1,
-            function.signature.arity,
-            function.signature.variadic,
-        );
-        self.stack.truncate(abs_base_stack);
-
-        self.call_function_unchecked(function, abs_base_pointer, abs_base_stack)
+    fn call_on_stack(&mut self, stack_base: usize) -> Result<Value, ErrorKind> {
+        let abs_stack = stack_base + self.base_stack();
+        let function = self.stack[abs_stack].try_function()?;
+        self.call_stack_args(function, stack_base + 1).inspect(|_| {
+            self.stack.truncate(abs_stack);
+        })
     }
     pub fn call_function_args(
         &mut self,
         function: Rc<Function>,
         args: impl IntoIterator<Item = Value>,
     ) -> Result<Value, ErrorKind> {
-        let base = self.stack.len();
-        self.stack.push(Value::Function(function));
+        let next_base = self.stack.len() - self.base_stack();
         for arg in args {
             self.stack.push(arg);
         }
-        self.call_function(base)
+        self.call_stack_args(function, next_base)
     }
 }
 

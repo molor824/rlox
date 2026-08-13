@@ -181,7 +181,6 @@ impl Codegen {
             Bytecode::StoreGlobal(..)
             | Bytecode::StoreLocal(..)
             | Bytecode::StoreUpvalue(..)
-            | Bytecode::Return
             | Bytecode::Binary(..)
             | Bytecode::BranchIf(..)
             | Bytecode::LoadPropertyIndirect
@@ -190,6 +189,7 @@ impl Codegen {
             | Bytecode::ExtendArray
             | Bytecode::AppendObj(..)
             | Bytecode::ExtendObj => stack - 1,
+            Bytecode::Return => stack.saturating_sub(1), // return without parameter will try to pop an empty stack which is still valid
             Bytecode::StoreProperty(..) | Bytecode::AppendObjIndirect => stack - 2,
             Bytecode::StorePropertyIndirect => stack - 3,
             Bytecode::Truncate(..)

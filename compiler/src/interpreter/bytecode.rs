@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 use crate::error::ErrorKind;
 use crate::interpreter::string::ValueStr;
 use crate::interpreter::value::{Function, Object, Value};
-use crate::interpreter::{Cell, FnSignature, Interpreter};
+use crate::interpreter::{FnSignature, Interpreter};
 use std::cell::RefCell;
 use std::mem::replace;
 use std::rc::Rc;
@@ -284,22 +284,20 @@ impl Bytecode {
             Bytecode::Truncate(new_len) => interpreter.truncate(*new_len),
             Bytecode::Return => return Ok(Err(interpreter.pop_stack())),
             Bytecode::Call(base) => {
-                let v = interpreter.call_function(*base)?;
+                let v = interpreter.call_on_stack(*base)?;
                 interpreter.push_stack(v);
             }
             Bytecode::CallVariadic => {
                 let params = interpreter.pop_stack();
                 let func = interpreter.pop_stack().try_function()?;
-                let abs_base_ptr = interpreter.memory.len();
-                let abs_base_stack = interpreter.stack.len();
+                let stack = interpreter.base_stack();
 
-                params.try_iterate(interpreter, |int, v| Ok(int.memory.push(Cell::Value(v))))?;
-                let ret =
-                    interpreter.call_function_unchecked(func, abs_base_ptr, abs_base_stack)?;
+                params.try_iterate(interpreter, |int, v| Ok(int.push_stack(v)))?;
+                let ret = interpreter.call_stack_args(func, stack)?;
                 interpreter.push_stack(ret);
             }
             Bytecode::CallBuiltin(base, func) => {
-                let v = interpreter.call_builtin_function(func.clone(), *base)?;
+                let v = interpreter.call_stack_args(func.clone(), *base)?;
                 interpreter.push_stack(v);
             }
         }
