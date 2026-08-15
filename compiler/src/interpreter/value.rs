@@ -215,8 +215,7 @@ impl Value {
                 if value == Value::Nil {
                     break;
                 }
-                let item = value.get_property(&Value::Number(0.0))?;
-                callback(interpreter, item)?;
+                callback(interpreter, value)?;
             },
             _ => return Err(ErrorKind::UniterableType(self.type_str())),
         }

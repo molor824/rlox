@@ -145,8 +145,7 @@ impl Codegen {
                  * Equivalent syntax:
                  * do
                  *   let __tmp = iter(expr)
-                 *   while let __tmp_item = __tmp(); __tmp_item != nil do
-                 *     let $ident = __tmp_item[0]
+                 *   while let $ident = __tmp(); $ident != nil do
                  *     $block
                  *   end
                  * end
@@ -184,8 +183,6 @@ impl Codegen {
                 self.push_bytecode(SpanOf(ident.0, Bytecode::BranchIf(false, 0)));
                 let cond_stack = self.stack_size();
                 // Condition met
-                self.push_bytecode(SpanOf(ident.0, Bytecode::LoadNum(0.0)));
-                self.push_bytecode(SpanOf(ident.0, Bytecode::LoadPropertyIndirect));
                 self.push_bytecode(SpanOf(ident.0, Bytecode::StoreLocal(ident_id)));
 
                 for stmt in block.1.iter() {
@@ -298,15 +295,13 @@ mod tests {
         Dup(2)
         LoadNil
         Binary(SetNe)
-        BranchIf(false, 9)
-        LoadNum(0.0)
-        LoadPropertyIndirect
+        BranchIf(false, 7)
         StoreLocal(1)
         LoadGlobal("print")
         LoadLocal(1)
         Call(0)
         Dup(0)
-        Jump(-13)
+        Jump(-11)
         Dup(0)
         Truncate(1)
         Truncate(0)"#.split('\n').map(str::trim).chain(std::iter::repeat("Nop"));

@@ -74,7 +74,7 @@ fn iter(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
                 if idx < len {
                     let v = arr.borrow().get(idx).cloned().unwrap_or_default();
                     idx += 1;
-                    Ok(Value::Array(Rc::new(RefCell::new(vec![v]))))
+                    Ok(v)
                 } else {
                     Ok(Value::Nil)
                 }
@@ -92,9 +92,7 @@ fn iter(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
                 0,
                 false,
                 move |_| match item_iter.next() {
-                    Some((k, v)) => Ok(Value::Array(Rc::new(RefCell::new(vec![Value::Array(
-                        Rc::new(RefCell::new(vec![k, v])),
-                    )])))),
+                    Some((k, v)) => Ok(Value::Array(Rc::new(RefCell::new(vec![k, v])))),
                     None => Ok(Value::Nil),
                 },
             ))
@@ -108,9 +106,7 @@ fn iter(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
                     Some(ch) => {
                         let prev_offset = offset;
                         offset += ch.len_utf8();
-                        Ok(Value::Array(Rc::new(RefCell::new(vec![Value::String(
-                            str.as_str()[prev_offset..offset].into(),
-                        )]))))
+                        Ok(Value::String(str.as_str()[prev_offset..offset].into()))
                     }
                     None => Ok(Value::Nil),
                 },
@@ -139,13 +135,56 @@ fn range(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
         } else {
             let v = Value::Number(start);
             start += step;
-            Ok(Value::Array(Rc::new(RefCell::new(vec![v]))))
+            Ok(v)
         }
     };
     let iter = Value::Function(Rc::new(Interpreter::create_builtin_function(
         0, false, iter_fn,
     )));
     Ok(iter)
+}
+thread_local! {
+    static ITER_FN: Rc<Function> = GLOBALS
+        .with(|globals| globals.get(&ValueStr::interned("iter")).unwrap().clone());
+}
+fn map(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    let iterable = interpreter.get_local(0);
+    let functor = interpreter.get_local(1).try_function()?;
+    let iterator = interpreter
+        .call_function_args(ITER_FN.with(|iter| iter.clone()), [iterable])?
+        .try_function()?;
+
+    let mapped_iter_fn = Interpreter::create_builtin_function(0, false, move |interpreter| {
+        let item = interpreter.call_function_args(iterator.clone(), [])?;
+        if item == Value::Nil {
+            return Ok(item);
+        }
+        interpreter.call_function_args(functor.clone(), [item])
+    });
+
+    Ok(Value::Function(Rc::new(mapped_iter_fn)))
+}
+fn filter(interpreter: &mut Interpreter) -> Result<Value, ErrorKind> {
+    let iterable = interpreter.get_local(0);
+    let predicate = interpreter.get_local(1).try_function()?;
+    let iterator = interpreter
+        .call_function_args(ITER_FN.with(|f| f.clone()), [iterable])?
+        .try_function()?;
+
+    let filtered_iter_fn =
+        Interpreter::create_builtin_function(0, false, move |interpreter| loop {
+            let item = interpreter.call_function_args(iterator.clone(), [])?;
+            if item == Value::Nil {
+                return Ok(item);
+            }
+            let filter = interpreter.call_function_args(predicate.clone(), [item.clone()])?;
+
+            if filter.as_bool() {
+                return Ok(item);
+            }
+        });
+
+    Ok(Value::Function(Rc::new(filtered_iter_fn)))
 }
 
 thread_local! {
@@ -159,6 +198,8 @@ thread_local! {
         ("iter", 1, false, iter),
         ("range", 3, false, range),
         ("str", 0, true, str),
+        ("map", 2, false, map),
+        ("filter", 2, false, filter),
     ].into_iter().map(|(name, arity, variadic, ptr)| (
         ValueStr::interned(name),
         Rc::new(Interpreter::create_builtin_function(arity, variadic, ptr))
